@@ -1,30 +1,28 @@
 <!DOCTYPE html>
-<html lang="it">
+<html lang="az">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
 
-    <title>Par🇮🇹le - Un gioco di parole al giorno (Wordle in italiano)</title>
-    <!--<meta name="description" content="Guess the hidden word in 6 tries. A new puzzle is available each day.">-->
-    <meta name="description" content="Indovina la parola nascosta in 6 tentativi. Un nuovo puzzle ogni giorno.">
+    <title>Wordle Azərbaycan dilində</title>
+    <meta name="description" content="6 cəhddə gizli sözü tapın. Hər gün yeni bir söz!">
     
     <!-- FB Meta Tags -->
-    <meta property="og:url" content="https://pietroppeter.github.io/wordle-it/wordle.html">
+    <meta property="og:url" content="https://wordleaz.synetrix.in/wordle.html">
     <meta property="og:type" content="website">
-    <meta property="og:title" content="Par🇮🇹le - Un gioco di parole al giorno (Wordle in italiano)">
-    <meta property="og:description" content="Indovina la parola nascosta in 6 tentativi. Un nuovo puzzle ogni giorno.">
-    <meta property="og:image" content="https://pietroppeter.github.io/wordle-it/images/parle_og_1200x630.png">
+    <meta property="og:title" content="Wordle Azərbaycan dilində">
+    <meta property="og:description" content="6 cəhddə gizli sözü tapın. Hər gün yeni bir söz!">
+    <meta property="og:image" content="https://wordleaz.synetrix.in/images/wordleaz_1200x630.png">
 
     <!-- Twitter Meta Tags -->
     <meta name="twitter:card" content="summary_large_image">
-    <meta property="twitter:domain" content="pietroppeter.github.io/wordle-it">
+    <meta property="twitter:domain" content="wordleaz.synetrix.in">
 
     <meta name="theme-color" content="#6aaa64" />
     <link rel="manifest" href="manifest.json" />
-    <link href="images/parle_logo_32x32.png" rel="icon shortcut" sizes="3232" />
-    <link href="images/parle_logo_192x192.png" rel="apple-touch-icon" />
+    <link href="images/wordleaz_logo_32x32.png" rel="icon shortcut" sizes="3232" />
+    <link href="images/wordleaz_logo_192x192.png" rel="apple-touch-icon" />
 
-    <script defer data-domain="pietroppeter.github.io/wordle-it" src="https://plausible.io/js/plausible.js"></script>
     <style>
       /* Global Styles & Colors */
       :root {
@@ -119,16 +117,26 @@
         overflow-y: hidden;
       }
     </style>
+
+    <!-- Global site tag (gtag.js) - Google Analytics -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-2B65CDBVB2"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+
+        gtag('config', 'G-2B65CDBVB2');
+    </script>
   </head>
   <body>
     <script>
       (function () {
         // Defining the hash before the main bundle allows the bundle access window.hash
         window.wordle = window.wordle || {};
-        window.wordle.hash = 'parle v220213';
+        window.wordle.hash = 'wordleaz v0.01';
       })();
     </script>
-    <script src="wordle-it.js"></script>
+    <script src="wordle-az.js"></script>
     <game-app></game-app>
   </body>
 </html>
