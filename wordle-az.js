@@ -1291,9 +1291,9 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(e) {
   var is = document.createElement("template");
   is.innerHTML = '\n  <div class="spacer"></div>\n';
   var ls = [
-          ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
-          ["-", "a", "s", "d", "f", "g", "h", "j", "k", "l", "-"],
-          ["↵", "z", "x", "c", "v", "b", "n", "m", "←"]
+          ["q", "ü", "e", "r", "t", "y", "u", "i", "o", "p", "ö", "ğ"],
+          ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ı", "ə",],
+          ["↵", "z", "x", "c", "v", "b", "n", "m", "ç", "ş", "←"]
       ],
       ds = function(e) {
           n(t, e);
