@@ -1,19 +1,4 @@
-/**
- * @license
- *****************************************************************************
-  Copyright (c) Microsoft Corporation.
 
-  Permission to use, copy, modify, and/or distribute this software for any
-  purpose with or without fee is hereby granted.
-
-  THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES WITH
-  REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF MERCHANTABILITY
-  AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY SPECIAL, DIRECT,
-  INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES WHATSOEVER RESULTING FROM
-  LOSS OF USE, DATA OR PROFITS, WHETHER IN AN ACTION OF CONTRACT, NEGLIGENCE OR
-  OTHER TORTIOUS ACTION, ARISING OUT OF OR IN CONNECTION WITH THE USE OR
-  PERFORMANCE OF THIS SOFTWARE.
-*****************************************************************************/
 'use strict';
 this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /**
@@ -2694,8 +2679,8 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var _temp = document.createElement("template");
   /** @type {string} */
   _temp.innerHTML = '\n  <div></div>\n';
-  /** @type {!Array} */
-  var pipelets = [["а", "а", "б", "r", "t", "i", "ç", "ş", "ö", "ğ", "ı", "ə", "'"], ["ф", "ы", "в", "а", "п", "р", "о", "л", "д", "ж", "э"], ["↵", "я", "ч", "с", "м", "і", "т", "ь", "б", "ю", "←"]];
+  /** @type {!Array} */ 
+  var pipelets = [["q", "ü", "e", "r", "t", "y", "u", "i", "o", "p", "ö", "ğ"], ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ı", "ə"], ["↵", "z", "x", "c", "v", "b", "n", "m", "ç", "ş", "←"]];
   var XDefined = function(e) {
     /**
      * @return {?}
@@ -2776,7 +2761,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
               }
               if ("↵" == char) {
                 /** @type {string} */
-                span.textContent = "увод";
+                span.textContent = "daxil";
                 span.classList.add("one-and-a-half");
               }
             } else {
