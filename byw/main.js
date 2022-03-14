@@ -2749,7 +2749,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
           s.classList.add("row");
           wrappersTemplates.forEach(function(char) {
             var span;
-            if ((char >= "а" && char <= "я" && char != "и" && char != "щ") || "'" === char || "ё" === char || "і" === char || "ў" === char || "←" === char || "↵" === char) {
+            if ((char >= "a") || "←" === char || "↵" === char) {
               if ((span = templateNode.content.cloneNode(true).firstElementChild).dataset.key = char, span.textContent = char, "←" === char) {
                 /** @type {!Element} */
                 var t = document.createElement("game-icon");
@@ -2958,7 +2958,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
                   url = url + "\n";
                 }
               }), {
-                text : "".concat(level, "\n\n").concat(url.trimEnd()).concat("\n\n#ўордлі\n\n").concat("https://ololophilolo.github.io/wordle-by/")
+                text : "".concat(level, "\n\n").concat(url.trimEnd()).concat("\n\n#\n\n").concat("http://wordleaz.synetrix.in/")
               };
             }({
               evaluations : self.gameApp.evaluations,
