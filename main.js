@@ -907,17 +907,17 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     /** @type {!Array} */
     switch(number) {
       case 1:
-        return "Першая";
+        return "Birinci";
       case 2:
-        return "Другая";
+        return "İkinci";
       case 3:
-        return "Трэцяя";
+        return "Üçüncü";
       case 4:
-        return "Чацвёртая";
+        return "Dördüncü";
 	  case 5:
-        return "Пятая";
+        return "Beşinci";
     }
-	return number + "-я";
+	return number + "-ci";
   }
   /**
    * @param {!Date} obj
