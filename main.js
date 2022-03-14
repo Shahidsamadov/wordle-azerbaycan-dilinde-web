@@ -2150,18 +2150,10 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   window.dataLayer = window.dataLayer || [];
   check("js", new Date);
   /** @type {!Array} */
-  var options = ["абвеў",
-"пузач",
-"апеты",
-"млявы",
-"амлет"
+  var options = ["şəüığ"
 ];
   /** @type {!Array} */
-  var updatedSet = ["аўгей",
-"аўген",
-"аўгіт",
-"аўгур",
-"ётавы",
+  var updatedSet = ["şəüığ"
 ];
   /** @type {string} */
   var c = "present";
