@@ -3252,7 +3252,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
                   url = url + "\n";
                 }
               }), {
-                text : "".concat(level, "\n\n").concat(url.trimEnd()).concat("\n\n#Wordle🇦🇿 \n\n").concat("http://wordleaz.synetrix.in/")
+                text : "".concat(level, "\n\n").concat(url.trimEnd()).concat("\n\n#WordleAZ \n\n").concat("http://wordleaz.synetrix.in/")
               };
             }({
               evaluations : self.gameApp.evaluations,
