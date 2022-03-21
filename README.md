@@ -2,12 +2,32 @@
 
 https://wordleaz.synetrix.in/
 
-Hər bir söz BEŞ hərfdən ibarətdir və siz bu sözü ALTI cəhdə tapmalısınız!
+---
+
+Orijinal oyunun müəllifi: Josh Wardle. ingilis dilində oynaya bilərsiniz.
+
+https://www.nytimes.com/games/wordle/index.html
+
+---
+
+Mənə maraqlı idi ki, bəs Azərbaycan dilində neçə 5 hərfdən ibarət söz tapmaq olar? Buna görə də Azərbaycan versiyasını etdim. Bir neçə lüğətdən istifadə etdim və onlardan 5 hərfli sözlər çıxartdım. 4873 söz oldu. Bu sözlərdən 1469-u  gündəlik istifadə etdiyimiz, 3404-u isə çox istifadə edilməyən (ağıla gəlməz 😊) sözlərdir.
+
+Sözlərdə səhv tapsaz və ya yeni söz əlavə etmək istəsəz yazın info@synetrix.in
+
+Söz bazası *wordbase* papkasının içində txt fayldadır.
+
+---
+
+
+
+## Qaydalar
+
+Hər bir söz **BEŞ** hərfdən ibarətdir və siz bu sözü **ALTI** cəhdə tapmalısınız!
 
 Hər cəhdən sonra xananın rəngi dəyişəcək və yazdığınız sözün nəzərdə tutulmuş sözə nə qədər yaxın olduğunu göstərəcək.
 
+### Nümunə
+
+![](assets/20220321_132752_Example.png)
+
 Hər gün yeni söz🇦🇿!
-
-
-Азербайджанскую версию сделал в основном для того, чтобы посмотреть много ли у нас слов из 5 букв - как оказалось не так уж много, как например на Английском. Смогли найти из нескольких словарей 1469 слов из 5 букв Существительных в единственном числе. И порядка 3404 слов для проверки состоящие из глаголов, сказуемых, существительных во множественном числе которые не привет в голову написать, как слово но отлично подойдет для проверки наличие букв
-Если нашли ошибку  то напишите info@synetrix.in
