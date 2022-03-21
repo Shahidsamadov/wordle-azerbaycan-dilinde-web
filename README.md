@@ -29,5 +29,3 @@ Hər cəhdən sonra xananın rəngi dəyişəcək və yazdığınız sözün nə
 ### Nümunə
 
 ![](assets/20220321_132752_Example.png)
-
-Hər gün yeni söz🇦🇿!
