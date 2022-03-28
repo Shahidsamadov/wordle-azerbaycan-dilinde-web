@@ -7428,7 +7428,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
           var isDisabled = node.disabled;
           switch(variableIdentifier) {
             case "hard-mode":
-              return void(isDisabled ? self.addToast("Hard mode can only be enabled at the start of a round", 1500, true) : (self.hardMode = connection, done({
+              return void(isDisabled ? self.addToast("Yalnız raundun əvvəlində işə salına bilər", 1500, true) : (self.hardMode = connection, done({
                 hardMode : connection
               })));
           }
