@@ -12,8 +12,6 @@ https://www.nytimes.com/games/wordle/index.html
 
 Mənə maraqlı idi ki, bəs Azərbaycan dilində neçə 5 hərfdən ibarət söz tapmaq olar? Buna görə də Azərbaycan versiyasını etdim. Bir neçə lüğətdən istifadə etdim və onlardan 5 hərfli sözlər çıxartdım. 4873 söz oldu. Bu sözlərdən 1469-u  gündəlik istifadə etdiyimiz, 3404-u isə çox istifadə edilməyən (ağıla gəlməz 😊) sözlərdir.
 
-Sözlərdə səhv tapsaz və ya yeni söz əlavə etmək istəsəz yazın info@synetrix.in
-
 Söz bazası *wordbase* papkasının içində txt fayldadır.
 
 ---
