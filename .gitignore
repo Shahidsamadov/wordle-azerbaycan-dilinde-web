@@ -1,0 +1,11 @@
+# Python virtual environment and bytecode (used by tools/*.py)
+.venv/
+__pycache__/
+*.py[cod]
+
+# Editor and operating-system noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

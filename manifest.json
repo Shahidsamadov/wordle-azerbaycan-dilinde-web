@@ -1,46 +1,65 @@
 {
-    "short_name": "Wordle🇦🇿 Azərbaycan dilində",
+    "id": "/",
+    "short_name": "WordleAZ",
     "name": "Wordle🇦🇿 Azərbaycan dilində",
+    "description": "Wordle Azərbaycan dilində - 6 cəhddə gizli sözü tapın. Hər gün yeni bir söz!",
+    "lang": "az",
+    "dir": "ltr",
     "icons": [
       {
         "src": "images/wordleaz_logo_48x48.png",
         "type": "image/png",
-        "sizes": "48x48"
+        "sizes": "48x48",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_72x72.png",
         "type": "image/png",
-        "sizes": "72x72"
+        "sizes": "72x72",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_96x96.png",
         "type": "image/png",
-        "sizes": "96x96"
+        "sizes": "96x96",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_144x144.png",
         "type": "image/png",
-        "sizes": "144x144"
+        "sizes": "144x144",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_168x168.png",
         "type": "image/png",
-        "sizes": "168x168"
+        "sizes": "168x168",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_192x192.png",
         "type": "image/png",
-        "sizes": "192x192"
+        "sizes": "192x192",
+        "purpose": "any"
       },
       {
         "src": "images/wordleaz_logo_512x512.png",
         "type": "image/png",
-        "sizes": "512x512"
+        "sizes": "512x512",
+        "purpose": "any"
+      },
+      {
+        "src": "images/maskable_512x512.png",
+        "type": "image/png",
+        "sizes": "512x512",
+        "purpose": "maskable"
       }
     ],
-    "start_url": "https://wordleaz.synetrix.in/",
-    "background_color": "#6aaa64",
+    "start_url": "./",
+    "scope": "./",
     "display": "standalone",
+    "orientation": "portrait",
+    "background_color": "#ffffff",
     "theme_color": "#6aaa64",
-    "description": "WORDLE🇦🇿 - Hər gün yeni söz tapın"
-  }
+    "categories": ["games", "entertainment"]
+}

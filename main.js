@@ -1,4 +1,65 @@
 
+/**
+ * ============================================================================
+ * WordleAZ - Wordle in the Azerbaijani language
+ * https://wordleaz.synetrix.in/
+ * ============================================================================
+ *
+ * WHAT THIS FILE IS
+ * -----------------
+ * This is the whole application, shipped as ONE pre-compiled file.  It was
+ * originally produced by transpiling the TypeScript sources of the official
+ * Wordle game (author: Josh Wardle) to ES5 with Babel and then bundling
+ * everything into a single IIFE.  Because of that, the code you are reading is
+ * *generated*: identifiers are shortened (``cls``, ``t``, ``api``), helper
+ * functions are hoisted to the top, and JSX-free HTML is stored in
+ * ``<template>`` elements.
+ *
+ * There is no build step in this repository - the file is edited directly, so
+ * be careful and keep the changes small.  A full rewrite into a proper module
+ * structure is listed as future work in README.md.
+ *
+ * HOW THE GAME WORKS (map of the file)
+ * ------------------------------------
+ *   1. ES5 transpilation helpers                ~lines   15-850
+ *   2. Persistence (localStorage read/write)    ~lines  850-1000
+ *   3. Daily answer rotation                    ~lines  1000-1050
+ *   4. Statistics                               ~lines  1050-1100
+ *   5. "Share result" (Web Share / clipboard)   ~lines 1300-1340
+ *   6. Custom elements:
+ *        <game-tile>       one letter cell
+ *        <game-row>        one row of five cells
+ *        <game-app>        the application shell (game logic lives here)
+ *        <game-keyboard>   the on-screen keyboard
+ *        <game-modal>      generic modal overlay
+ *        <game-page>       full-screen page overlay
+ *        <game-stats>      statistics modal
+ *        <game-settings>   settings page
+ *        <game-switch>     toggle switch
+ *        <game-toast>      small notification bubble
+ *        <game-icon>       inline SVG icon
+ *        <countdown-timer> "next word in hh:mm:ss"
+ *   7. Word lists (generated - see the warning below)   ~lines 2150-7050
+ *   8. Application shell template + logic               ~lines 7050-end
+ *
+ * INVARIANTS - please keep these true
+ * -----------------------------------
+ *   * Every daily answer must be exactly 5 characters long and may only
+ *     contain letters from ``choices`` (the 32 letters of the Azerbaijani
+ *     keyboard).  A single stray character such as ``:`` makes that day
+ *     impossible to win, because the player has no way to type it.  This
+ *     happened once with the entry ``dəng:``.
+ *   * ``options`` (the daily answers) is an ORDERED list.  The answer for a
+ *     day is ``options[(dayOffset * 26641) % options.length]``, so inserting
+ *     or removing an entry shifts every future puzzle.
+ *   * The two word lists below are generated.  Do NOT hand-edit them:
+ *     edit ``wordbase/main_words.txt`` / ``wordbase/examination_words.txt``
+ *     and run ``python tools/build_wordlists.py``.  Verify with
+ *     ``python tools/validate_wordlists.py``.
+ *
+ * @license MIT (see README.md)
+ */
+
 'use strict';
 this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /**
@@ -853,7 +914,25 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       };
     }(id, val, key), id + "");
   }
+  /* ------------------------------------------------------------------------ *
+   * PERSISTENCE LAYER (localStorage)
+   * ------------------------------------------------------------------------ *
+   * The game keeps everything on the player's device - there is no backend and
+   * no account.  Two keys are used here:
+   *
+   *   "gameState"  (variable `url`)             : the game in progress
+   *   "statistics" (STORAGE_KEY_MOCKSTORE)      : the win/loss statistics
+   *
+   * plus two theme keys handled by <game-theme-manager>:
+   *
+   *   "darkTheme" / "colorBlindTheme"
+   *
+   * `parse()` never throws for a missing key (it falls back to the defaults in
+   * `data`), but a *corrupt* value would make JSON.parse throw, so callers are
+   * expected to keep the stored shape backwards compatible.
+   * ------------------------------------------------------------------------ */
   /**
+   * Read the saved game state, merged over the defaults in `data`.
    * @return {?}
    */
   function parse() {
@@ -862,6 +941,8 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     return JSON.parse(favs_data);
   }
   /**
+   * Persist a partial game-state update.  Only the keys present in `rows` are
+   * overwritten, so callers can update a single field at a time.
    * @param {?} rows
    * @return {undefined}
    */
@@ -872,14 +953,23 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     }(_afterCreateRow(createdRows, rows));
   }
   /**
+   * Forward an event to Google Analytics through the global dataLayer.
+   * Keep the payload small and never include the solution word itself.
    * @return {undefined}
    */
   function check() {
     dataLayer.push(arguments);
   }
   /**
-   * @param {!Array} errors
-   * @param {!NodeList} component
+   * Reduce the per-row evaluations into a single "best known state" per letter.
+   * That map drives the colouring of the on-screen keyboard.
+   *
+   * A letter keeps the strongest result it ever received, because `settings`
+   * ranks correct > present > absent.  Without the comparison a later yellow
+   * would downgrade an earlier green.
+   *
+   * @param {!Array} errors    boardState: the guesses, one string per row
+   * @param {!NodeList} component evaluations: the score of each finished row
    * @return {?}
    */
   function filter(errors, component) {
@@ -920,6 +1010,115 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
 	return number + "-ci";
   }
   /**
+   * Hard mode ("Cətin variant" / "Çətin variant") validation.
+   *
+   * The setting promises that every revealed hint has to be reused in the
+   * following guesses.  The check must therefore look at ALL rows played so
+   * far, not only at the row directly above the one being submitted:
+   *
+   *   * a letter revealed as `correct` at position i must be typed again at
+   *     exactly the same position i;
+   *   * for every letter revealed as `correct` or `present`, the new guess
+   *     must contain at least as many copies of that letter as the most
+   *     demanding previous row revealed.
+   *
+   * The maximum is taken per row instead of summing over rows - this is what
+   * the official game does.  Summing would eventually demand more copies of a
+   * letter than the answer contains, and the puzzle would become unsolvable.
+   *
+   * @param {string} guess                       word about to be submitted
+   * @param {!Array<string>} boardState          one string per row (all guesses)
+   * @param {!Array<?Array<string>>} evaluations one evaluation array per row
+   * @param {number} rowIndex                    index of the row being submitted
+   * @return {{validGuess: boolean, errorMessage: (string|undefined)}}
+   */
+  function validateHardMode(guess, boardState, evaluations, rowIndex) {
+    if (!guess) {
+      return {
+        validGuess : true
+      };
+    }
+    /** @type {!Object<string,number>} */
+    var requiredCounts = {};
+    /** @type {number} */
+    var row = 0;
+    for (; row < rowIndex; row++) {
+      var previousGuess = boardState[row];
+      var evaluation = evaluations[row];
+      if (!previousGuess || !evaluation) {
+        continue;
+      }
+      /** @type {!Object<string,number>} */
+      var countsInRow = {};
+      /** @type {number} */
+      var position = 0;
+      for (; position < evaluation.length; position++) {
+        /** @type {string} */
+        var state = evaluation[position];
+        /** @type {string} */
+        var letter = previousGuess[position];
+        if (!letter) {
+          continue;
+        }
+        if (state === correctLetter && guess[position] !== letter) {
+          return {
+            validGuess : false,
+            errorMessage : "".concat(ordinal(position + 1), " hərf ").concat(letter.toUpperCase(), " olmalıdır")
+          };
+        }
+        if (state === correctLetter || state === c) {
+          countsInRow[letter] = (countsInRow[letter] || 0) + 1;
+        }
+      }
+      /** @type {string} */
+      var counted;
+      for (counted in countsInRow) {
+        if ((requiredCounts[counted] || 0) < countsInRow[counted]) {
+          requiredCounts[counted] = countsInRow[counted];
+        }
+      }
+    }
+    // Count how many copies of each letter the new guess contains.
+    /** @type {!Object<string,number>} */
+    var guessCounts = {};
+    /** @type {number} */
+    var index = 0;
+    for (; index < guess.length; index++) {
+      guessCounts[guess[index]] = (guessCounts[guess[index]] || 0) + 1;
+    }
+    /** @type {string} */
+    var required;
+    for (required in requiredCounts) {
+      if ((guessCounts[required] || 0) < requiredCounts[required]) {
+        return {
+          validGuess : false,
+          errorMessage : "Sözdə ".concat(required.toUpperCase(), " hərfi olmalıdır")
+        };
+      }
+    }
+    return {
+      validGuess : true
+    };
+  }
+  /* ------------------------------------------------------------------------ *
+   * DAILY ANSWER ROTATION
+   * ------------------------------------------------------------------------ *
+   * Every player in the same calendar day gets the same word.  The word is
+   * picked deterministically from `options` so that no server is needed:
+   *
+   *     dayOffset = whole days between 2022-01-16 and today (local time)
+   *     index     = (dayOffset * 26641) % options.length
+   *
+   * 26641 was chosen so that gcd(26641, options.length) == 1, which means the
+   * cycle visits every answer exactly once before repeating.  tools/
+   * validate_wordlists.py re-checks that property on every run - if the number
+   * of answers ever changes, the multiplier must be re-checked as well.
+   *
+   * The day boundary is the *local* midnight of the player, matching the
+   * original game.  That keeps the countdown timer honest.
+   * ------------------------------------------------------------------------ */
+  /**
+   * Whole calendar days between two dates, ignoring the time of day.
    * @param {!Date} obj
    * @param {!Date} val
    * @return {?}
@@ -932,48 +1131,118 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     return Math.round(filmSteps / 864E5);
   }
   /**
+   * Is this word something the player is able to type?
+   *
+   * The on-screen keyboard only offers the 32 letters in `choices`, and every
+   * keystroke is validated against that alphabet, so a word containing anything
+   * else (a colon, a digit, an accented foreign letter) can never be entered.
+   * Serving such a word as the daily answer makes that day impossible to win.
+   *
+   * @param {string} word
+   * @return {boolean}
+   */
+  function isTypeableWord(word) {
+    if (word.length !== 5) {
+      return false;
+    }
+    /** @type {number} */
+    var i = 0;
+    for (; i < word.length; i++) {
+      if (choices.indexOf(word[i]) < 0) {
+        return false;
+      }
+    }
+    return true;
+  }
+  /**
+   * The answer for a given day.
    * @param {!Date} a
    * @return {?}
    */
   function isDate(a) {
     var i;
     var j = getTime(a);
-    return i = j * 26641 % options.length, options[i];
+    i = j * 26641 % options.length;
+    // Safety net for bad data in the word base: if the entry for today is not
+    // typeable, fall through to the next one instead of handing the player an
+    // unwinnable puzzle.  With a clean word base this loop never runs, so the
+    // classic rotation (and therefore every already-published answer) is
+    // unchanged.  tools/validate_wordlists.py should still reject such data.
+    /** @type {number} */
+    var guard = 0;
+    while (guard < options.length && !isTypeableWord(options[i])) {
+      i = (i + 1) % options.length;
+      guard += 1;
+    }
+    return options[i];
   }
   /**
+   * The puzzle number ("day offset") for a given day.
    * @param {!Date} token
    * @return {?}
    */
   function getTime(token) {
     return cb(mutationsMap, token);
   }
+  /* ------------------------------------------------------------------------ *
+   * STATISTICS
+   * ------------------------------------------------------------------------ *
+   * Stored under the "statistics" key:
+   *   currentStreak / maxStreak : consecutive wins
+   *   guesses                   : how many games were won in 1..6 tries, plus
+   *                               the "fail" bucket (FAIL_GUESS_KEY) counting
+   *                               games that were lost
+   *   winPercentage / gamesPlayed / gamesWon / averageGuesses
+   *
+   * WIN_PERCENTAGE and AVERAGE_GUESSES are derived values.  They are cached in
+   * localStorage so the stats modal can render without recomputing, but they
+   * are recomputed from the raw counters on every finished game.
+   * ------------------------------------------------------------------------ */
   /**
-   * @param {!NodeList} values
-   * @return {?}
-   */
-  function combine(values) {
-    /** @type {string} */
-    var ret = "";
-    /** @type {number} */
-    var j = 0;
-    for (; j < values.length; j++) {
-      /** @type {number} */
-      var braceIndex = choices.indexOf(values[j]);
-      /** @type {string} */
-      ret = ret + (braceIndex >= 0 ? braces[braceIndex] : "_");
-    }
-    return ret;
-  }
-  /**
+   * Read the statistics object, repairing anything a previous version of the
+   * game (or a hand-edited localStorage entry) may have left incomplete.
+   *
+   * Older builds stored `guesses` without the "fail" bucket and without a
+   * numeric fallback, which used to produce NaN for every derived value.  The
+   * normalisation below makes the reader tolerant instead of trusting the
+   * stored shape.
+   *
    * @return {?}
    */
   function deepClone() {
     /** @type {string} */
     var favs_data = window.localStorage.getItem(STORAGE_KEY_MOCKSTORE) || JSON.stringify(train1or);
-    return JSON.parse(favs_data);
+    /** @type {?} */
+    var stored = JSON.parse(favs_data);
+    if (!stored || "object" !== typeof stored) {
+      stored = {};
+    }
+    if (!stored.guesses || "object" !== typeof stored.guesses) {
+      stored.guesses = {};
+    }
+    // 1..6 wins + the loss bucket, each guaranteed to be a number.
+    /** @type {number} */
+    var guess = 1;
+    for (; guess <= 6; guess++) {
+      if ("number" !== typeof stored.guesses[guess]) {
+        stored.guesses[guess] = 0;
+      }
+    }
+    if ("number" !== typeof stored.guesses[FAIL_GUESS_KEY]) {
+      stored.guesses[FAIL_GUESS_KEY] = 0;
+    }
+    var counter;
+    for (counter in train1or) {
+      if ("guesses" !== counter && "number" !== typeof stored[counter]) {
+        stored[counter] = train1or[counter];
+      }
+    }
+    return stored;
   }
   /**
-   * @param {?} options
+   * Record the outcome of a finished game and persist the new statistics.
+   *
+   * @param {?} options {isWin, isStreak, numGuesses}
    * @return {undefined}
    */
   function draw(options) {
@@ -992,7 +1261,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     } else {
       /** @type {number} */
       data.currentStreak = 0;
-      data.guesses.fail += 1;
+      data.guesses[FAIL_GUESS_KEY] += 1;
     }
     /** @type {number} */
     data.maxStreak = Math.max(data.currentStreak, data.maxStreak);
@@ -1000,12 +1269,17 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     data.gamesWon += stdout ? 1 : 0;
     /** @type {number} */
     data.winPercentage = Math.round(data.gamesWon / data.gamesPlayed * 100);
+    // Average number of tries over the *won* games.  The "fail" bucket is
+    // excluded (its key is not numeric, so it is skipped) and the division is
+    // guarded: a player whose first game is a loss has gamesWon === 0, which
+    // used to produce NaN / Infinity here.
     /** @type {number} */
-    data.averageGuesses = Math.round(Object.entries(data.guesses).reduce(function(i, select) {
+    data.averageGuesses = 0 === data.gamesWon ? 0 : Math.round(Object.entries(data.guesses).reduce(function(i, select) {
       var res = update(select, 2);
       var k = res[0];
       var width = res[1];
-      return k !== undefined ? i = i + k * width : i;
+      // Skip the loss bucket: its key ("fail") cannot be used as a multiplier.
+      return k !== FAIL_GUESS_KEY ? i = i + Number(k) * width : i;
     }, 0) / data.gamesWon);
     (function(commitData) {
       window.localStorage.setItem(STORAGE_KEY_MOCKSTORE, JSON.stringify(commitData));
@@ -1289,9 +1563,15 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     });
   }
   /**
-   * @param {!Object} time
-   * @param {!Function} end
-   * @param {!Function} range
+   * Hand the result to the player.
+   *
+   * On a mobile browser that supports the Web Share API the native share sheet
+   * is used; on desktop (and on Firefox, which does not support sharing text)
+   * the result is copied to the clipboard instead.
+   *
+   * @param {!Object} time  {text: string} built by <game-stats>
+   * @param {!Function} end  called on success
+   * @param {!Function} range called on failure
    * @return {undefined}
    */
   function render(time, end, range) {
@@ -1326,7 +1606,20 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var conferenceGroupDetailsTemplate = document.createElement("template");
   /** @type {string} */
-  conferenceGroupDetailsTemplate.innerHTML = "\n<style>\n  :host {\n    display: inline-block;\n  }\n  .tile {\n    width: 100%;\n    display: inline-flex;\n    justify-content: center;\n    align-items: center;\n    font-size: 2rem;\n    line-height: 2rem;\n    font-weight: bold;\n    vertical-align: middle;\n    box-sizing: border-box;\n    color: var(--tile-text-color);\n    text-transform: ;\n    user-select: none;\n  }\n  .tile::before {\n    content: '';\n    display: inline-block;\n    padding-bottom: 100%;\n  }\n\n  /* Allow tiles to be smaller on small screens */\n  @media (max-height: 600px) {\n    .tile {\n      font-size: 1em;\n      line-height: 1em;\n    }\n  }\n\n  .tile[data-state='empty'] {\n    border: 2px solid var(--color-tone-4);\n  }\n  .tile[data-state='tbd'] {\n    background-color: var(--color-tone-7);\n    border: 2px solid var(--color-tone-3);\n    color: var(--color-tone-1);\n  }\n  .tile[data-state='correct'] {\n    background-color: var(--color-correct);\n  }\n  .tile[data-state='present'] {\n    background-color: var(--color-present);\n  }\n  .tile[data-state='absent'] {\n    background-color: var(--color-absent);\n  }\n\n  .tile[data-animation='pop'] {\n    animation-name: PopIn;\n    animation-duration: 100ms;\n  }\n\n  @keyframes PopIn {\n    from {\n      transform: scale(0.8);\n      opacity: 0;\n    }\n\n    40% {\n      transform: scale(1.1);\n      opacity: 1;\n    }\n  }\n  .tile[data-animation='flip-in'] {\n    animation-name: FlipIn;\n    animation-duration: 250ms;\n    animation-timing-function: ease-in;\n  }\n  @keyframes FlipIn {\n    0% {\n      transform: rotateX(0);\n    }\n    100% {\n      transform: rotateX(-90deg);\n    }\n  }\n  .tile[data-animation='flip-out'] {\n    animation-name: FlipOut;\n    animation-duration: 250ms;\n    animation-timing-function: ease-in;\n  }\n  @keyframes FlipOut {\n    0% {\n      transform: rotateX(-90deg);\n    }\n    100% {\n      transform: rotateX(0);\n    }\n  }\n</style>\n<div class=\"tile\" data-state=\"empty\" data-animation=\"idle\"></div>\n";
+  conferenceGroupDetailsTemplate.innerHTML = "\n<style>\n  :host {\n    display: inline-block;\n  }\n  .tile {\n    width: 100%;\n    display: inline-flex;\n    justify-content: center;\n    align-items: center;\n    font-size: 2rem;\n    line-height: 2rem;\n    font-weight: bold;\n    vertical-align: middle;\n    box-sizing: border-box;\n    color: var(--tile-text-color);\n    text-transform: uppercase;\n    user-select: none;\n  }\n  .tile::before {\n    content: '';\n    display: inline-block;\n    padding-bottom: 100%;\n  }\n\n  /* Allow tiles to be smaller on small screens */\n  @media (max-height: 600px) {\n    .tile {\n      font-size: 1em;\n      line-height: 1em;\n    }\n  }\n\n  .tile[data-state='empty'] {\n    border: 2px solid var(--color-tone-4);\n  }\n  .tile[data-state='tbd'] {\n    background-color: var(--color-tone-7);\n    border: 2px solid var(--color-tone-3);\n    color: var(--color-tone-1);\n  }\n  .tile[data-state='correct'] {\n    background-color: var(--color-correct);\n  }\n  .tile[data-state='present'] {\n    background-color: var(--color-present);\n  }\n  .tile[data-state='absent'] {\n    background-color: var(--color-absent);\n  }\n\n  .tile[data-animation='pop'] {\n    animation-name: PopIn;\n    animation-duration: 100ms;\n  }\n\n  @keyframes PopIn {\n    from {\n      transform: scale(0.8);\n      opacity: 0;\n    }\n\n    40% {\n      transform: scale(1.1);\n      opacity: 1;\n    }\n  }\n  .tile[data-animation='flip-in'] {\n    animation-name: FlipIn;\n    animation-duration: 250ms;\n    animation-timing-function: ease-in;\n  }\n  @keyframes FlipIn {\n    0% {\n      transform: rotateX(0);\n    }\n    100% {\n      transform: rotateX(-90deg);\n    }\n  }\n  .tile[data-animation='flip-out'] {\n    animation-name: FlipOut;\n    animation-duration: 250ms;\n    animation-timing-function: ease-in;\n  }\n  @keyframes FlipOut {\n    0% {\n      transform: rotateX(-90deg);\n    }\n    100% {\n      transform: rotateX(0);\n    }\n  }\n</style>\n<div class=\"tile\" data-state=\"empty\" data-animation=\"idle\"></div>\n";
+  /* ------------------------------------------------------------------------ *
+   * <game-tile> - ONE LETTER CELL
+   * ------------------------------------------------------------------------ *
+   * Renders a single box.  Its look is driven by two data attributes on the
+   * inner `.tile` element:
+   *   data-state     empty | tbd | correct | present | absent
+   *   data-animation pop | flip-in | flip-out | idle
+   *
+   * The reveal is deliberately split into flip-in -> change colour -> flip-out,
+   * which is why the colour is only applied in the `animationend` handler for
+   * FlipIn.  `last` marks the fifth cell of a row: when it finishes flipping,
+   * the row knows every cell has been revealed.
+   * ------------------------------------------------------------------------ */
   var Class = function(e) {
     /**
      * @return {?}
@@ -1430,6 +1723,20 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var parts = document.createElement("template");
   /** @type {string} */
   parts.innerHTML = '\n  <style>\n    :host {\n      display: block;\n    }\n    :host([invalid]){\n      animation-name: Shake;\n      animation-duration: 600ms;\n    }\n    .row {\n      display: grid;\n      grid-template-columns: repeat(5, 1fr);\n      grid-gap: 5px;\n    }\n    .win {\n      animation-name: Bounce;\n      animation-duration: 1000ms;\n    }\n\n    @keyframes Bounce {\n      0%, 20% {\n        transform: translateY(0);\n      }\n      40% {\n        transform: translateY(-30px);\n      }\n      50% {\n        transform: translateY(5px);\n      }\n      60% {\n        transform: translateY(-15px);\n      }\n      80% {\n        transform: translateY(2px);\n      }\n      100% {\n        transform: translateY(0);\n      }\n    }\n\n    @keyframes Shake {\n      10%,\n      90% {\n        transform: translateX(-1px);\n      }\n\n      20%,\n      80% {\n        transform: translateX(2px);\n      }\n\n      30%,\n      50%,\n      70% {\n        transform: translateX(-4px);\n      }\n\n      40%,\n      60% {\n        transform: translateX(4px);\n      }\n    }\n  </style>\n  <div class="row"></div>\n';
+  /* ------------------------------------------------------------------------ *
+   * <game-row> - ONE ROW OF FIVE CELLS
+   * ------------------------------------------------------------------------ *
+   * Attributes:
+   *   letters   the string typed so far, e.g. "dəng" - setting it is the only
+   *             way to update the row (see the `letters` case below)
+   *   length    how many cells to create (always 5 here)
+   *   invalid   triggers the "shake" animation; removed when it ends
+   *   win       triggers the "bounce" animation on all five cells
+   *
+   * `evaluation` is a JS property (not an attribute): assigning it starts the
+   * staggered reveal, 300 ms per cell, and the last cell fires
+   * `game-last-tile-revealed-in-row` which unlocks the next input.
+   * ------------------------------------------------------------------------ */
   var cls = function(e) {
     /**
      * @return {?}
@@ -1555,6 +1862,18 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var shop_id = "darkTheme";
   /** @type {string} */
   var STORE_ID = "colorBlindTheme";
+  /* ------------------------------------------------------------------------ *
+   * <game-theme-manager> - DARK / HIGH-CONTRAST THEME
+   * ------------------------------------------------------------------------ *
+   * Wraps the whole game and toggles the `nightmode` / `colorblind` classes on
+   * <body>; the CSS variables in index.html then re-theme everything.
+   *
+   * Preference order for the dark theme:
+   *   1. an explicit choice saved in localStorage ("darkTheme")
+   *   2. otherwise the OS setting (prefers-color-scheme: dark)
+   * If localStorage is unavailable the read throws, which is why the values are
+   * parsed defensively.
+   * ------------------------------------------------------------------------ */
   var SorTable = function(e) {
     /**
      * @return {?}
@@ -2047,7 +2366,17 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var nodes = document.createElement("template");
   /** @type {string} */
-  nodes.innerHTML = '\n  <style>\n  .setting {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid var(--color-tone-4);\n    padding: 16px 0;\n  }\n\n  a, a:visited {\n    color: var(--color-tone-2);\n  }\n\n  .title {\n    font-size: 18px;\n  }\n  .text {\n    padding-right: 8px;\n  }\n  .description {\n    font-size: 12px;\n    color: var(--color-tone-2);\n  }\n\n  #footnote {\n    position: absolute;\n    bottom: 0;\n    left: 0;\n    right: 0;\n    padding: 16px;\n    color: var(--color-tone-2);\n    font-size: 12px;\n    text-align: right;\n    display: flex;\n    justify-content: space-between;\n    align-items: flex-end;\n  }\n\n  @media only screen and (min-device-width : 320px) and (max-device-width : 480px) {\n    .setting {\n      padding: 16px;\n    }\n  }\n\n  </style>\n  <div class="sections">\n    <section>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Çətin variant</div>\n          <div class="description">Hər bir işarə sonrakı cəhdlərdə istifadə edilməlidir.</div>\n        </div>\n        <div class="control">\n          <game-switch id="hard-mode" name="hard-mode"></game-switch>\n        </div>\n      </div>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Qaranlıq mod</div>\n        </div>\n        <div class="control">\n          <game-switch id="dark-theme" name="dark-theme"></game-switch>\n        </div>\n      </div>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Kontrast rənglər</div>\n        </div>\n        <div class="control">\n          <game-switch id="color-blind-theme" name="color-blind-theme"></game-switch>\n        </div>\n      </div>\n    </section>\n\n    <section>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Əlaqə</div>\n        </div>\n        <div class="control">\n          <a href="https://synetrix.in"  target="blank" title="Synetrix.in">Synetrix.in</a>\n          |\n          <a href="mailto:info@synetrix.in" target="blank" title="info@synetrix.in">info@synetrix.in</a>\n        </div>\n      </div>\n    </section>\n <section>\n      <div class="setting">\n        <div class="text">\n   <p>Söz bazasını və ya maraqlandığınız digər məlumatlar <a href = "https://github.com/Shahidsamadov/wordle-azerbaycan-dilinde-web" target="_blank">github-da</a> ətraflı şəkildə görə bilərsiniz </p>       <p>Orijinal oyunun müəllifi: Josh Wardle. <a href = "https://www.nytimes.com/games/wordle/" target="_blank">Linkdə</a> ingilis dilində oynaya bilərsiniz.</section>\n  </div>\n  <div id="footnote">\n    <div>\n      <div id="puzzle-number"></div>\n </div>\n  </div>\n';
+  nodes.innerHTML = '\n  <style>\n  .setting {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    border-bottom: 1px solid var(--color-tone-4);\n    padding: 16px 0;\n  }\n\n  a, a:visited {\n    color: var(--color-tone-2);\n  }\n\n  .title {\n    font-size: 18px;\n  }\n  .text {\n    padding-right: 8px;\n  }\n  .description {\n    font-size: 12px;\n    color: var(--color-tone-2);\n  }\n\n  #footnote {\n    position: absolute;\n    bottom: 0;\n    left: 0;\n    right: 0;\n    padding: 16px;\n    color: var(--color-tone-2);\n    font-size: 12px;\n    text-align: right;\n    display: flex;\n    justify-content: space-between;\n    align-items: flex-end;\n  }\n\n  @media only screen and (min-device-width : 320px) and (max-device-width : 480px) {\n    .setting {\n      padding: 16px;\n    }\n  }\n\n  </style>\n  <div class="sections">\n    <section>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Çətin variant</div>\n          <div class="description">Hər bir işarə sonrakı cəhdlərdə istifadə edilməlidir.</div>\n        </div>\n        <div class="control">\n          <game-switch id="hard-mode" name="hard-mode"></game-switch>\n        </div>\n      </div>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Qaranlıq mod</div>\n        </div>\n        <div class="control">\n          <game-switch id="dark-theme" name="dark-theme"></game-switch>\n        </div>\n      </div>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Kontrast rənglər</div>\n        </div>\n        <div class="control">\n          <game-switch id="color-blind-theme" name="color-blind-theme"></game-switch>\n        </div>\n      </div>\n    </section>\n\n    <section>\n      <div class="setting">\n        <div class="text">\n          <div class="title">Əlaqə</div>\n        </div>\n        <div class="control">\n          <a href="https://synetrix.in" target="_blank" rel="noopener" title="Synetrix.in">Synetrix.in</a>\n          |\n          <a href="mailto:info@synetrix.in" target="_blank" rel="noopener" title="info@synetrix.in">info@synetrix.in</a>\n        </div>\n      </div>\n    </section>\n <section>\n      <div class="setting">\n        <div class="text">\n          <p>Söz bazasını və ya maraqlandığınız digər məlumatlar <a href="https://github.com/Shahidsamadov/wordle-azerbaycan-dilinde-web" target="_blank" rel="noopener">github-da</a> ətraflı şəkildə görə bilərsiniz.</p>\n          <p>Orijinal oyunun müəllifi: Josh Wardle. <a href="https://www.nytimes.com/games/wordle/" target="_blank" rel="noopener">Linkdə</a> ingilis dilində oynaya bilərsiniz.</p>\n        </div>\n      </div>\n    </section>\n  </div>\n  <div id="footnote">\n    <div>\n      <div id="puzzle-number"></div>\n </div>\n  </div>\n';
+  /* ------------------------------------------------------------------------ *
+   * <game-settings> - SETTINGS PAGE
+   * ------------------------------------------------------------------------ *
+   * Three switches: hard mode, dark theme and the high-contrast palette.
+   *
+   * `render()` reflects the current state back into the switches:
+   *   * dark / colour-blind come from the classes on <body>;
+   *   * hard mode comes from localStorage and is DISABLED as soon as the first
+   *     guess has been made, because the rule cannot be applied retroactively.
+   * ------------------------------------------------------------------------ */
   var XelDemoElement = function(e) {
     /**
      * @return {?}
@@ -2115,6 +2444,18 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {string} */
   content.innerHTML = '\n  <style>\n    .toast {\n      position: relative;\n      margin: 16px;\n      background-color: var(--color-tone-1);\n      color: var(--color-tone-7);\n      padding: 16px;\n      border: none;\n      border-radius: 4px;\n      opacity: 1;\n      transition: opacity 300ms cubic-bezier(0.645, 0.045, 0.355, 1);\n      font-weight: 700;\n    }\n    .win {\n      background-color: var(--color-correct);\n      color: var(--tile-text-color);\n    }\n    .fade {\n      opacity: 0;\n    }\n  </style>\n  <div class="toast"></div>\n';
   var wndMain;
+  /* ------------------------------------------------------------------------ *
+   * <game-toast> - SMALL NOTIFICATION BUBBLE
+   * ------------------------------------------------------------------------ *
+   * Attributes:
+   *   text      the message
+   *   duration  how long to stay visible, in ms.  The literal string
+   *             "Infinity" keeps it on screen forever - that is how the answer
+   *             is revealed after a loss.  `setTimeout` would otherwise be
+   *             called with Infinity, hence the string comparison.
+   *
+   * The bubble removes itself once its fade-out transition finishes.
+   * ------------------------------------------------------------------------ */
   var ActionSheetButtonElement = function(e) {
     /**
      * @return {?}
@@ -2149,6 +2490,27 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   customElements.define("game-toast", ActionSheetButtonElement);
   window.dataLayer = window.dataLayer || [];
   check("js", new Date);
+  /* ------------------------------------------------------------------------ *
+   * WORD LISTS - GENERATED CONTENT, DO NOT EDIT BY HAND
+   * ------------------------------------------------------------------------ *
+   * `options`    : the pool of DAILY ANSWERS.  ORDER MATTERS!
+   *                answer(day) = options[(dayOffset * 26641) % options.length]
+   *                so inserting or removing an entry shifts every future
+   *                puzzle and players would see words they already played.
+   * `updatedSet` : extra words accepted as a GUESS but never used as the daily
+   *                answer (rare / obscure words).  Order is irrelevant here.
+   *
+   * How to change them:
+   *   1. edit wordbase/main_words.txt        (the daily answers)
+   *      or   wordbase/examination_words.txt  (the extra accepted guesses)
+   *   2. python tools/build_wordlists.py      (regenerates both arrays below)
+   *   3. python tools/validate_wordlists.py   (must print "All checks passed")
+   *
+   * A guess is accepted when it is present in EITHER of the two lists.
+   * Every entry must be exactly 5 characters long and use only letters of the
+   * 32-letter Azerbaijani alphabet (`choices`), otherwise that day becomes
+   * impossible to win - players cannot type a character that has no key.
+   * ------------------------------------------------------------------------ */
   /** @type {!Array} */
   var options = ["abidə",
   "abunə",
@@ -2448,7 +2810,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "delta",
   "dəmir",
   "dəmli",
-  "dəng:",
+  "dəndə",
   "dəniz",
   "dənli",
   "dəqiq",
@@ -3692,7 +4054,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "ağulu",
   "ağyal",
   "ağyan",
-  "Ağyol",
+  "ağyol",
   "akant",
   "aksiz",
   "aktin",
@@ -3718,7 +4080,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "aliyə",
   "alkan",
   "allaf",
-  "Allah",
+  "allah",
   "allür",
   "alman",
   "altda",
@@ -4193,7 +4555,6 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "cizyə",
   "çocuq",
   "çodar",
-  "çökə2",
   "çökük",
   "çöllü",
   "çölmə",
@@ -4301,7 +4662,6 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "dəmin",
   "dəmyə",
   "dənab",
-  "dəndə",
   "dəray",
   "dərbə",
   "dərək",
@@ -5909,7 +6269,6 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "qarlı",
   "qarma",
   "qarov",
-  "qart3",
   "qarta",
   "qartı",
   "qarun",
@@ -6094,7 +6453,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "quqqu",
   "qurab",
   "qürab",
-  "Quran",
+  "quran",
   "qurna",
   "qurra",
   "qürrə",
@@ -7005,7 +7364,6 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "zılxa",
   "zınba",
   "zində",
-  "zınq2",
   "zıqqı",
   "zirab",
   "zıran",
@@ -7022,19 +7380,34 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   "zorlu",
   "zübdə",
   "zubul",
-  "Zühəl",
+  "zühəl",
   "zükur",
   "zülam",
   "zumar",
   "zümrə",
   "züyçü"
 ];
+  /* ------------------------------------------------------------------------ *
+   * GAME CONSTANTS
+   * ------------------------------------------------------------------------ */
+  /**
+   * The three evaluation states of a letter.  A guess is scored in two passes:
+   *   1. every exact hit is marked `correct`;
+   *   2. each remaining letter is marked `present` when the answer still holds
+   *      an unused copy of it, otherwise `absent`.
+   * The string values double as the CSS `data-state` / `dataset.state` values.
+   */
   /** @type {string} */
   var c = "present";
   /** @type {string} */
   var correctLetter = "correct";
   /** @type {string} */
   var bytes = "absent";
+  /**
+   * Relative strength of each state.  Used to keep the best result when the
+   * same letter is evaluated in several rows (green must never be downgraded
+   * to yellow by a later guess).
+   */
   var settings = {
     unknown : 0,
     absent : 1,
@@ -7043,14 +7416,28 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   };
   /** @type {!Date} */
   var mutationsMap = new Date(2022, 0, 16, 0, 0, 0, 0);
+  /**
+   * The 32 letters of the Azerbaijani alphabet, in the order used by the
+   * on-screen keyboard.  This is the ONLY set of characters a player can type:
+   * `addLetter` and the physical-keyboard handler both reject anything else, and
+   * the daily answer must therefore consist of these letters only.
+   */
   /** @type {string} */
   var choices = "qüertyuiopöğasdfghjklıəzxcvbnmçş";
-  /** @type {!Array<?>} */
-  var braces = [].concat(toArray(choices.split("").slice(13)), toArray(choices.split("").slice(0, 13)));
   /** @type {string} */
   var STORAGE_KEY_MOCKSTORE = "statistics";
+  /**
+   * Key of the statistics bucket that counts LOST games.  It is deliberately
+   * not numeric: `draw()` skips it when computing the average number of tries.
+   * (Previously this was stored in a variable literally named `undefined`,
+   * which shadowed the global `undefined` inside this bundle.)
+   */
   /** @type {string} */
-  var undefined = "fail";
+  var FAIL_GUESS_KEY = "fail";
+  /**
+   * Default statistics for a brand new player.  Also used as the schema when
+   * normalising older, incomplete values read from localStorage.
+   */
   var train1or = {
     currentStreak : 0,
     maxStreak : 0,
@@ -7061,7 +7448,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       4 : 0,
       5 : 0,
       6 : 0
-    }, undefined, 0),
+    }, FAIL_GUESS_KEY, 0),
     winPercentage : 0,
     gamesPlayed : 0,
     gamesWon : 0,
@@ -7070,19 +7457,36 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var post = document.createElement("template");
   /** @type {string} */
-  post.innerHTML = "\n  <style>\n  .toaster {\n    position: absolute;\n    top: 10%;\n    left: 50%;\n    transform: translate(-50%, 0);\n    pointer-events: none;\n    width: fit-content;\n  }\n  #game-toaster {\n    z-index: ".concat(1E3, ";\n  }\n  #system-toaster {\n    z-index: ").concat(4E3, ';\n  }\n\n  #game {\n    width: 100%;\n    max-width: var(--game-max-width);\n    margin: 0 auto;\n    height: 100%;\n    display: flex;\n    flex-direction: column;\n  }\n  header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    height: var(--header-height);\n    color: var(--color-tone-1);\n    border-bottom: 1px solid var(--color-tone-4);\n  }\n  header .title {\n    font-weight: 700;\n    font-size: 36px;\n    letter-spacing: 0.2rem;\n    text-transform: ;\n    text-align: center;\n    position: absolute;\n    left: 0;\n    right: 0;\n    pointer-events: none;\n  }\n\n  @media (max-width: 360px) {\n    header .title {\n      font-size: 22px;\n      letter-spacing: 0.1rem;\n    }\n  }\n\n  #board-container {\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    flex-grow: 1;\n    overflow: hidden;\n  }\n  #board {\n    display: grid;\n    grid-template-rows: repeat(6, 1fr);\n    grid-gap: 5px;\n    padding:10px;\n    box-sizing: border-box;\n  }\n  button.icon {\n    background: none;\n    border: none;\n    cursor: pointer;\n    padding: 0 4px;\n  }\n\n  #debug-tools {\n    position: absolute;\n    bottom: 0;\n  }\n\n  </style>\n  <game-theme-manager>\n    <div id="game">\n      <header>\n        <div class="menu">\n          <button id="help-button" class="icon" aria-label="help">\n            <game-icon icon="help"></game-icon>\n          </button>\n        </div>\n        <div class="title">\n         WORDLE🇦🇿\n        </div>\n        <div class="menu">\n          <button id="statistics-button" class="icon" aria-label="statistics">\n            <game-icon icon="statistics"></game-icon>\n          </button>\n          <button id="settings-button" class="icon" aria-label="settings">\n            <game-icon icon="settings"></game-icon>\n          </button>\n        </div>\n      </header>\n        <div id="board-container">\n          <div id="board"></div>\n        </div>\n        <game-keyboard></game-keyboard>\n        <game-modal></game-modal>\n        <game-page></game-page>\n        <div class="toaster" id="game-toaster"></div>\n        <div class="toaster" id="system-toaster"></div>\n    </div>\n  </game-theme-manager>\n  <div id="debug-tools"></div>\n');
+  post.innerHTML = "\n  <style>\n  .toaster {\n    position: absolute;\n    top: 10%;\n    left: 50%;\n    transform: translate(-50%, 0);\n    pointer-events: none;\n    width: fit-content;\n  }\n  #game-toaster {\n    z-index: ".concat(1E3, ";\n  }\n  #system-toaster {\n    z-index: ").concat(4E3, ';\n  }\n\n  #game {\n    width: 100%;\n    max-width: var(--game-max-width);\n    margin: 0 auto;\n    height: 100%;\n    display: flex;\n    flex-direction: column;\n  }\n  header {\n    display: flex;\n    justify-content: space-between;\n    align-items: center;\n    height: var(--header-height);\n    color: var(--color-tone-1);\n    border-bottom: 1px solid var(--color-tone-4);\n  }\n  header .title {\n    font-weight: 700;\n    font-size: 36px;\n    letter-spacing: 0.2rem;\n    text-transform: uppercase;\n    text-align: center;\n    position: absolute;\n    left: 0;\n    right: 0;\n    pointer-events: none;\n  }\n\n  @media (max-width: 360px) {\n    header .title {\n      font-size: 22px;\n      letter-spacing: 0.1rem;\n    }\n  }\n\n  #board-container {\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    flex-grow: 1;\n    overflow: hidden;\n  }\n  #board {\n    display: grid;\n    grid-template-rows: repeat(6, 1fr);\n    grid-gap: 5px;\n    padding:10px;\n    box-sizing: border-box;\n  }\n  button.icon {\n    background: none;\n    border: none;\n    cursor: pointer;\n    padding: 0 4px;\n  }\n\n  #debug-tools {\n    position: absolute;\n    bottom: 0;\n  }\n\n  </style>\n  <game-theme-manager>\n    <div id="game">\n      <header>\n        <div class="menu">\n          <button id="help-button" class="icon" aria-label="Qaydalar">\n            <game-icon icon="help"></game-icon>\n          </button>\n        </div>\n        <div class="title">\n         WORDLE🇦🇿\n        </div>\n        <div class="menu">\n          <button id="statistics-button" class="icon" aria-label="Statistika">\n            <game-icon icon="statistics"></game-icon>\n          </button>\n          <button id="settings-button" class="icon" aria-label="Ayarlar">\n            <game-icon icon="settings"></game-icon>\n          </button>\n        </div>\n      </header>\n        <div id="board-container">\n          <div id="board"></div>\n        </div>\n        <game-keyboard></game-keyboard>\n        <game-modal></game-modal>\n        <game-page></game-page>\n        <div class="toaster" id="game-toaster" role="status" aria-live="polite" aria-atomic="true"></div>\n        <div class="toaster" id="system-toaster" role="status" aria-live="polite" aria-atomic="true"></div>\n    </div>\n  </game-theme-manager>\n  <div id="debug-tools"></div>\n');
   /** @type {!Element} */
   var form = document.createElement("template");
   /** @type {string} */
   form.innerHTML = '\n<button id="reveal">reveal</button>\n<button id="shake">shake</button>\n<button id="bounce">bounce</button>\n<button id="toast">toast</button>\n<button id="modal">modal</button>\n';
+  /* ------------------------------------------------------------------------ *
+   * GAME STATUS VALUES
+   * ------------------------------------------------------------------------ *
+   * These three constants are the possible values of `gameStatus`:
+   *   exitCode   "IN_PROGRESS" - the game is still being played
+   *   CONNECTING "WIN"         - the answer was guessed
+   *   obj        "FAIL"        - all six tries were used up
+   *
+   * The names are leftovers from the minifier and cannot be renamed safely
+   * (`obj` is also used as a local parameter name in several helpers), so they
+   * are documented here instead.  Compare with `this.gameStatus === CONNECTING`
+   * rather than with the literal string.
+   * ------------------------------------------------------------------------ */
   /** @type {string} */
   var exitCode = "IN_PROGRESS";
   /** @type {string} */
   var CONNECTING = "WIN";
   /** @type {string} */
   var obj = "FAIL";
+  /**
+   * Praise shown when the puzzle is solved in 1..6 tries.  Index = tries - 1.
+   * Kept intentionally short because it appears in a small toast bubble.
+   */
   /** @type {!Array} */
-  var pedalboards = ["İnanılmaz", "Əla", "Əlaçı", "Möcüzə", "Xeyirli", "Wow!"];
+  var pedalboards = ["İnanılmaz", "Əla", "Möhtəşəm", "Möcüzə", "Xeyirli", "Of!"];
   var DialogElement = function(e) {
     /**
      * @return {?}
@@ -7119,73 +7523,77 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
         solution : self.solution,
         gameStatus : self.gameStatus
       }), check("event", "level_start", {
-        level_name : combine(self.solution)
+        // Only the puzzle number is reported.  The answer word itself must never
+        // leave the device: it would be sent to a third party before the player
+        // has even started guessing.
+        level_name : "#".concat(self.dayOffset)
       })) : (self.boardState = data.boardState, self.evaluations = data.evaluations, self.rowIndex = data.rowIndex, self.solution = data.solution, self.dayOffset = getTime(self.today), self.letterEvaluations = filter(self.boardState, self.evaluations), self.gameStatus = data.gameStatus, self.lastCompletedTs = data.lastCompletedTs, self.hardMode = data.hardMode, self.gameStatus !== exitCode && (self.canInput = false), self.restoringFromLocalStorage = true), self;
     }
     on(init, e);
     var request = makeRequest(init);
+    /* ------------------------------------------------------------------------ *
+     * <game-app> - THE APPLICATION SHELL
+     * ------------------------------------------------------------------------ *
+     * All game rules live in this element.  It owns the board, the keyboard and
+     * the modals, and it keeps the whole game state in the shadow DOM plus
+     * localStorage.
+     *
+     * State kept on the instance:
+     *   boardState        {string[6]}  what the player typed, one row per try
+     *   evaluations       {?string[6][5]} the score of each finished row
+     *   letterEvaluations {Object}     best known result per letter (keyboard)
+     *   rowIndex          {number}     which row is being played (0-based)
+     *   tileIndex         {number}     how many letters of that row are filled
+     *   solution          {string}     today's answer
+     *   gameStatus        {string}     IN_PROGRESS / WIN / FAIL
+     *   canInput          {boolean}    false while a row is animating
+     *   hardMode          {boolean}    "Çətin variant"
+     * ------------------------------------------------------------------------ */
     return trigger(init, [{
       key : "evaluateRow",
+      /**
+       * Score the current row and advance the game.
+       *
+       * Steps:
+       *   1. refuse words that are not in the dictionary (either list);
+       *   2. in hard mode, refuse words that ignore an earlier hint;
+       *   3. score the row with the two-pass algorithm below;
+       *   4. record the result, update the keyboard colours and, when the row
+       *      was the last chance or a perfect hit, finish the game.
+       */
       value : function() {
         if (5 === this.tileIndex && !(this.rowIndex >= 6)) {
           var value;
           var brickInput = this.$board.querySelectorAll("game-row")[this.rowIndex];
           var integer = this.boardState[this.rowIndex];
+          // Dictionary check: a guess is accepted if it is in EITHER list.
           if (value = integer, !updatedSet.includes(value) && !options.includes(value)) {
             return brickInput.setAttribute("invalid", ""), void this.addToast("Mən bu sözü bilmirəm!");
           }
           if (this.hardMode) {
-            var that = function(x, obj, word) {
-              if (!x || !obj || !word) {
-                return {
-                  validGuess : true
-                };
-              }
-              /** @type {number} */
-              var i = 0;
-              for (; i < word.length; i++) {
-                if (word[i] === correctLetter && x[i] !== obj[i]) {
-                  return {
-                    validGuess : false,
-                    errorMessage : "".concat(ordinal(i + 1), " Hərf olmalıdır ").concat(obj[i].toUpperCase())
-                  };
-                }
-              }
-              var o = {};
-              /** @type {number} */
-              var k = 0;
-              for (; k < word.length; k++) {
-                if ([correctLetter, c].includes(word[k])) {
-                  if (o[obj[k]]) {
-                    o[obj[k]] += 1;
-                  } else {
-                    /** @type {number} */
-                    o[obj[k]] = 1;
-                  }
-                }
-              }
-              var newValuesArr = x.split("").reduce(function(eventsDict, event) {
-                return eventsDict[event] ? eventsDict[event] += 1 : eventsDict[event] = 1, eventsDict;
-              }, {});
-              var f;
-              for (f in o) {
-                if ((newValuesArr[f] || 0) < o[f]) {
-                  return {
-                    validGuess : false,
-                    errorMessage : "Söz olmalıdır ".concat(f.toUpperCase())
-                  };
-                }
-              }
-              return {
-                validGuess : true
-              };
-            }(integer, this.boardState[this.rowIndex - 1], this.evaluations[this.rowIndex - 1]);
+            // Validated against every row played so far (see validateHardMode).
+            var that = validateHardMode(integer, this.boardState, this.evaluations, this.rowIndex);
             var malakh = that.validGuess;
             var paramErrorMessage = that.errorMessage;
             if (!malakh) {
-              return brickInput.setAttribute("invalid", ""), void this.addToast(paramErrorMessage || "Not valid in hard mode");
+              return brickInput.setAttribute("invalid", ""), void this.addToast(paramErrorMessage || "Bu cəhd çətin variantın qaydalarına uyğun deyil");
             }
           }
+          /**
+           * Two-pass scoring of one guess against the answer.
+           *
+           * Pass 1 marks exact hits as `correct` and consumes those positions.
+           * Pass 2 walks the remaining positions left to right and marks a
+           * letter `present` only when an *unconsumed* copy of it still exists
+           * in the answer, otherwise `absent`.
+           *
+           * Doing it in two passes is what makes repeated letters correct: for
+           * the answer "ABACA" the guess "AABBB" must not report the second "A"
+           * as present, because the only two A's were already matched.
+           *
+           * @param {string} p the guess, @param {string} s the answer
+           * @return {!Array<string>} one state per letter
+           */
           var that = function(p, s) {
             /** @type {!IArrayLike<?>} */
             var v = Array(s.length).fill(bytes);
@@ -7247,7 +7655,8 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
             /** @type {string} */
             this.gameStatus = propertyName ? CONNECTING : obj;
             check("event", "level_end", {
-              level_name : combine(this.solution),
+              // Again: the puzzle number only, never the solution word.
+              level_name : "#".concat(this.dayOffset),
               num_guesses : this.rowIndex,
               success : propertyName
             });
@@ -7268,6 +7677,15 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       }
     }, {
       key : "addLetter",
+      /**
+       * Append one letter to the row currently being typed.
+       *
+       * The letter is written into `boardState` and mirrored to the <game-row>
+       * through its `letters` attribute - the row element is the single source
+       * of truth for what is displayed, so the DOM is never edited directly.
+       *
+       * @param {string} recB a lowercase letter from `choices`
+       */
       value : function(recB) {
         if (this.gameStatus === exitCode) {
           if (this.canInput) {
@@ -7281,6 +7699,10 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       }
     }, {
       key : "removeLetter",
+      /**
+       * Delete the last letter of the current row (Backspace / ←).
+       * Also clears the shake animation so the row stops wiggling.
+       */
       value : function() {
         if (this.gameStatus === exitCode && this.canInput && !(this.tileIndex <= 0)) {
           this.boardState[this.rowIndex] = this.boardState[this.rowIndex].slice(0, this.boardState[this.rowIndex].length - 1);
@@ -7296,16 +7718,30 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       }
     }, {
       key : "submitGuess",
+      /**
+       * Enter was pressed: score the row, but first make sure it is complete.
+       * An incomplete row shakes instead of being evaluated.
+       */
       value : function() {
         if (this.gameStatus === exitCode && this.canInput) {
           if (5 !== this.tileIndex) {
-            return this.$board.querySelectorAll("game-row")[this.rowIndex].setAttribute("invalid", ""), void this.addToast("Hərf catmır!");
+            return this.$board.querySelectorAll("game-row")[this.rowIndex].setAttribute("invalid", ""), void this.addToast("Hərf çatmır!");
           }
           this.evaluateRow();
         }
       }
     }, {
       key : "addToast",
+      /**
+       * Show a short message bubble.
+       *
+       * @param {string} reason            text to display
+       * @param {number=} label            how long it stays visible, in ms.
+       *                                   Pass Infinity to keep it on screen
+       *                                   (used to reveal the answer on a loss).
+       * @param {boolean=} s               true = system toaster (above the game
+       *                                   toaster), false = game toaster
+       */
       value : function(reason, label) {
         var s = arguments.length > 2 && void 0 !== arguments[2] && arguments[2];
         /** @type {!Element} */
@@ -7322,6 +7758,10 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
       }
     }, {
       key : "sizeBoard",
+      /**
+       * Fit the 5x6 board into the available height while keeping the cells
+       * square.  Called on connect and on every window resize.
+       */
       value : function() {
         var scrollbar_handle = this.shadowRoot.querySelector("#board-container");
         /** @type {number} */
@@ -7460,14 +7900,32 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
         this.shadowRoot.getElementById("statistics-button").addEventListener("click", function(a) {
           self.showStatsModal();
         });
-        window.addEventListener("resize", this.sizeBoard.bind(this));
+        // Keep a bound reference so the listener can be removed again in
+        // disconnectedCallback; binding inline would leak one handler per
+        // element instance.
+        this._onResize = this.sizeBoard.bind(this);
+        window.addEventListener("resize", this._onResize);
       }
     }, {
       key : "disconnectedCallback",
       value : function() {
+        // <game-app> normally lives for the whole page lifetime, but release
+        // the window listener anyway so the element can be detached safely.
+        if (this._onResize) {
+          window.removeEventListener("resize", this._onResize);
+          this._onResize = void 0;
+        }
       }
     }, {
       key : "debugTools",
+      /**
+       * Developer-only helpers: reveal / shake / bounce / toast / modal buttons
+       * rendered into an empty `#debug-tools` div.
+       *
+       * NOTE: nothing calls this method any more, so the buttons never appear.
+       * It is kept because it is handy while working on the animations - attach
+       * it manually from the console if you need it.
+       */
       value : function() {
         var i = this;
         this.shadowRoot.getElementById("debug-tools").appendChild(form.content.cloneNode(true));
@@ -7502,6 +7960,13 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var tabs = document.createElement("template");
   /** @type {string} */
   tabs.innerHTML = "\n  <style>\n    .overlay {\n      display: none;\n      position: absolute;\n      width: 100%;\n      height: 100%;\n      top: 0;\n      left: 0;\n      justify-content: center;\n      align-items: center;\n      background-color: var(--opacity-50);\n      z-index: ".concat(3E3, ';\n    }\n\n    :host([open]) .overlay {\n      display: flex;\n    }\n\n    .content {\n      position: relative;\n      border-radius: 8px;\n      border: 1px solid var(--color-tone-6);\n      background-color: var(--modal-content-bg);\n      color: var(--color-tone-1);\n      box-shadow: 0 4px 23px 0 rgba(0, 0, 0, 0.2);\n      width: 90%;\n      max-height: 90%;\n      overflow-y: auto;\n      animation: SlideIn 200ms;\n      max-width: var(--game-max-width);\n      padding: 16px;\n      box-sizing: border-box;\n    }\n\n    .content.closing {\n      animation: SlideOut 200ms;\n    }\n\n    .close-icon {\n      width: 24px;\n      height: 24px;\n      position: absolute;\n      top: 16px;\n      right: 16px;\n    }\n\n    game-icon {\n      position: fixed;\n      user-select: none;\n      cursor: pointer;\n    }\n\n    @keyframes SlideIn {\n      0% {\n        transform: translateY(30px);\n        opacity: 0;\n      }\n      100% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n    }\n    @keyframes SlideOut {\n      0% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n      90% {\n        opacity: 0;\n      }\n      100% {\n        opacity: 0;\n        transform: translateY(60px);\n      }\n    }\n  </style>\n  <div class="overlay">\n    <div class="content">\n      <slot></slot>\n      <div class="close-icon">\n        <game-icon icon="close"></game-icon>\n      </div>\n    </div>\n  </div>\n');
+  /* ------------------------------------------------------------------------ *
+   * <game-modal> - CENTERED OVERLAY (stats, help on first visit)
+   * ------------------------------------------------------------------------ *
+   * A generic box in the middle of the screen.  Clicking anywhere dismisses it:
+   * a `closing` class starts the slide-out animation and the content is removed
+   * when that animation ends, so the element can be reopened with new content.
+   * ------------------------------------------------------------------------ */
   var XBabel2 = function(e) {
     /**
      * @return {?}
@@ -7536,17 +8001,36 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var fragment = document.createElement("template");
   /** @type {string} */
-  fragment.innerHTML = "\n  <style>\n  :host {\n    height: var(--keyboard-height);\n  }\n  #keyboard {\n    margin: 0 8px;\n    user-select: none;\n  }\n  \n  .row {\n    display: flex;\n    width: 100%;\n    margin: 0 auto 8px;\n    /* https://stackoverflow.com/questions/46167604/ios-html-disable-double-tap-to-zoom */\n    touch-action: manipulation;\n  }\n  \n  button {\n    font-family: inherit;\n    font-weight: bold;\n    border: 0;\n    padding: 0;\n    margin: 0 6px 0 0;\n    height: 58px;\n    border-radius: 4px;\n    cursor: pointer;\n    user-select: none;\n    background-color: var(--key-bg);\n    color: var(--key-text-color);\n    flex: 1;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    text-transform: ;\n    -webkit-tap-highlight-color: rgba(0,0,0,0.3);\n  }\n\n  button:focus {\n    outline: none;\n  }\n\n  button.fade {\n    transition: background-color 0.1s ease, color 0.1s ease;\n  }\n  \n  button:last-of-type {\n    margin: 0;\n  }\n  \n  .half {\n    flex: 0.5;\n  }\n  \n  .one {\n    flex: 1;\n  }\n\n  .one-and-a-half {\n    flex: 1.5;\n    font-size: 12px;\n  }\n  \n  .two {\n    flex: 2;\n  }\n\n  button[data-state='correct'] {\n    background-color: var(--key-bg-correct);\n    color: var(--key-evaluated-text-color);\n  }\n\n  button[data-state='present'] {\n    background-color: var(--key-bg-present);\n    color: var(--key-evaluated-text-color);\n  }\n\n  button[data-state='absent'] {\n    background-color: var(--key-bg-absent);\n    color: var(--key-evaluated-text-color);\n  }\n\n  </style>\n  <div id=\"keyboard\"></div>\n";
+  fragment.innerHTML = "\n  <style>\n  :host {\n    height: var(--keyboard-height);\n  }\n  #keyboard {\n    margin: 0 8px;\n    user-select: none;\n  }\n  \n  .row {\n    display: flex;\n    width: 100%;\n    margin: 0 auto 8px;\n    /* https://stackoverflow.com/questions/46167604/ios-html-disable-double-tap-to-zoom */\n    touch-action: manipulation;\n  }\n  \n  button {\n    font-family: inherit;\n    font-weight: bold;\n    border: 0;\n    padding: 0;\n    margin: 0 6px 0 0;\n    height: 58px;\n    border-radius: 4px;\n    cursor: pointer;\n    user-select: none;\n    background-color: var(--key-bg);\n    color: var(--key-text-color);\n    flex: 1;\n    display: flex;\n    justify-content: center;\n    align-items: center;\n    text-transform: uppercase;\n    -webkit-tap-highlight-color: rgba(0,0,0,0.3);\n  }\n\n  button:focus {\n    outline: none;\n  }\n\n  button.fade {\n    transition: background-color 0.1s ease, color 0.1s ease;\n  }\n  \n  button:last-of-type {\n    margin: 0;\n  }\n  \n  .half {\n    flex: 0.5;\n  }\n  \n  .one {\n    flex: 1;\n  }\n\n  .one-and-a-half {\n    flex: 1.5;\n    font-size: 12px;\n  }\n  \n  .two {\n    flex: 2;\n  }\n\n  button[data-state='correct'] {\n    background-color: var(--key-bg-correct);\n    color: var(--key-evaluated-text-color);\n  }\n\n  button[data-state='present'] {\n    background-color: var(--key-bg-present);\n    color: var(--key-evaluated-text-color);\n  }\n\n  button[data-state='absent'] {\n    background-color: var(--key-bg-absent);\n    color: var(--key-evaluated-text-color);\n  }\n\n  </style>\n  <div id=\"keyboard\"></div>\n";
   /** @type {!Element} */
   var templateNode = document.createElement("template");
   /** @type {string} */
   templateNode.innerHTML = "\n  <button>key</button>\n";
-  /** @type {!Element} */
-  var _temp = document.createElement("template");
-  /** @type {string} */
-  _temp.innerHTML = '\n  <div></div>\n';
+  /**
+   * Layout of the on-screen keyboard: 12 / 11 / 9 keys plus the two wide
+   * special keys "↵" (enter) and "←" (backspace).
+   *
+   * These 32 letters are exactly the Azerbaijani alphabet and must match the
+   * `choices` string - that string is what decides which characters a player is
+   * allowed to type, and the word lists are validated against it.
+   *
+   * Note: "ı" is U+0131 (dotless i) and "i" is U+0069, they are two different
+   * letters in Azerbaijani and both are present.
+   */
   /** @type {!Array} */ 
   var pipelets = [["q", "ü", "e", "r", "t", "y", "u", "i", "o", "p", "ö", "ğ"], ["a", "s", "d", "f", "g", "h", "j", "k", "l", "ı", "ə"], ["↵", "z", "x", "c", "v", "b", "n", "m", "ç", "ş", "←"]];
+  /* ------------------------------------------------------------------------ *
+   * <game-keyboard> - ON-SCREEN KEYBOARD
+   * ------------------------------------------------------------------------ *
+   * A dumb input device: it only dispatches a `game-key-press` CustomEvent with
+   * `detail.key` set to either a letter, "↵" or "←".  It does not know the
+   * rules of the game - <game-app> interprets the key.
+   *
+   * Two input sources are supported: clicking a key and typing on a physical
+   * keyboard.  Both go through the same event, so the game logic exists once.
+   *
+   * `letterEvaluations` (set by <game-app>) colours the keys.
+   * ------------------------------------------------------------------------ */
   var XDefined = function(e) {
     /**
      * @return {?}
@@ -7609,29 +8093,48 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
             el.classList.remove("fade");
           }
         });
+        /**
+         * Build the three keyboard rows from `pipelets`.
+         *
+         * Every key is a <button> carrying a `data-key`.  Clicking it (or
+         * pressing the matching physical key) dispatches `game-key-press`,
+         * which <game-app> turns into addLetter / removeLetter / submitGuess.
+         *
+         * Whether a key is a letter or a special key is decided with `choices`
+         * (the alphabet), not with an ASCII comparison - the previous check
+         * (`char >= "a"`) happened to work for the 32 Azerbaijani letters but
+         * relied on their Unicode order.
+         *
+         * The two special keys have no text of their own (the backspace key
+         * only contains an icon), so they get an explicit `aria-label`.
+         */
         pipelets.forEach(function(wrappersTemplates) {
           /** @type {!Element} */
           var s = document.createElement("div");
           s.classList.add("row");
           wrappersTemplates.forEach(function(char) {
-            var span;
-            if ((char >= "a") || "←" === char || "↵" === char) {
-              if ((span = templateNode.content.cloneNode(true).firstElementChild).dataset.key = char, span.textContent = char, "←" === char) {
+            /** @type {!Element} */
+            var span = templateNode.content.cloneNode(true).firstElementChild;
+            span.dataset.key = char;
+            if (choices.indexOf(char) >= 0) {
+              // A letter key.  The visible glyph is uppercased by CSS.
+              span.textContent = char;
+              span.setAttribute("aria-label", char.toUpperCase());
+            } else {
+              span.classList.add("one-and-a-half");
+              if ("←" === char) {
                 /** @type {!Element} */
                 var t = document.createElement("game-icon");
                 t.setAttribute("icon", "backspace");
                 /** @type {string} */
                 span.textContent = "";
                 span.appendChild(t);
-                span.classList.add("one-and-a-half");
-              }
-              if ("↵" == char) {
+                span.setAttribute("aria-label", "Sil");
+              } else {
                 /** @type {string} */
                 span.textContent = "daxil";
-                span.classList.add("one-and-a-half");
+                span.setAttribute("aria-label", "Daxil et");
               }
-            } else {
-              (span = _temp.content.cloneNode(true).firstElementChild).classList.add(1 === char.length ? "half" : "one");
             }
             s.appendChild(span);
           });
@@ -7652,9 +8155,9 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     }]), update;
   }(register(HTMLElement));
   customElements.define("game-keyboard", XDefined);
-  (function() {
-    (console.warn || console.log).apply(console, arguments);
-  }).bind("[clipboard-polyfill]");
+  // NOTE: the [clipboard-polyfill] warning shim that used to sit here has been
+  // removed.  It built a function with .bind() and immediately threw the result
+  // away, so it never ran - the real clipboard writing happens in render().
   var dom;
   var list;
   var app;
@@ -7683,7 +8186,7 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var $template = document.createElement("template");
   /** @type {string} */
-  $template.innerHTML = '\n  <style>\n    .container {\n      display: flex;\n      flex-direction: column;\n      align-items: center;\n      justify-content: center;\n      padding: 16px 0; \n    }\n    h1 {\n      font-weight: 700;\n      font-size: 16px;\n      letter-spacing: 0.5px;\n      text-transform: ;\n      text-align: center;\n      margin-bottom: 10px;\n    }\n  \n    #statistics {\n      display: flex;\n      margin-bottom: \n    }\n\n    .statistic-container {\n      flex: 1;\n    }\n\n    .statistic-container .statistic {\n      font-size: 36px;\n      font-weight: 400;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n      text-align: center;\n      letter-spacing: 0.05em;\n      font-variant-numeric: proportional-nums;\n    }\n\n    .statistic.timer {\n      font-variant-numeric: initial;\n    }\n\n    .statistic-container .label {\n      font-size: 12px;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n      text-align: center;\n    }\n\n    #guess-distribution {\n      width: 80%;\n    }\n\n    .graph-container {\n      width: 100%;\n      height: 20px;\n      display: flex;\n      align-items: center;\n      padding-bottom: 4px;\n      font-size: 14px;\n      line-height: 20px;\n    }\n\n    .graph-container .graph {\n      width: 100%;\n      height: 100%;\n      padding-left: 4px;\n    }\n\n    .graph-container .graph .graph-bar {\n      height: 100%;\n      /* Assume no wins */\n      width: 0%;\n      position: relative;\n      background-color: var(--color-absent);\n      display: flex;\n      justify-content: center;\n    }\n\n    .graph-container .graph .graph-bar.highlight {\n      background-color: var(--color-correct);\n    }\n\n    .graph-container .graph .graph-bar.align-right {\n      justify-content: flex-end;\n      padding-right: 8px;\n    }\n\n    .graph-container .graph .num-guesses {\n      font-weight: bold;\n      color: var(--tile-text-color);\n    }\n\n    #statistics,\n    #guess-distribution {\n      padding-bottom: 10px;\n    }\n\n    .footer {\n      display: flex;\n      width: 100%;\n    }\n\n    .countdown {\n      border-right: 1px solid var(--color-tone-1);\n      padding-right: 12px;\n      width: 50%;\n    }\n\n    .share {\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      padding-left: 12px;\n      width: 50%;\n    }\n\n    .no-data {\n      text-align: center;\n    }\n\n    button#share-button {\n      background-color: var(--key-bg-correct);\n      color: var(--key-evaluated-text-color);\n      font-family: inherit;\n      font-weight: bold;\n      border-radius: 4px;\n      cursor: pointer;\n      border: none;\n      user-select: none;\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      text-transform: ;\n      -webkit-tap-highlight-color: rgba(0,0,0,0.3);\n      width: 80%;\n      font-size: 12px;\n      height: 52px;\n      -webkit-filter: brightness(100%);\n    }\n    button#share-button:hover {\n      opacity: 0.9;\n    }\n    button#share-button game-icon {\n      width: 24px;\n      height: 24px;\n      padding-left: 8px;\n    }\n  </style>\n\n  <div class="container">\n    <h1>Statistika</h1>\n    <div id="statistics"></div>\n    <h1>Oyun tarixi</h1>\n    <div id="guess-distribution"></div>\n    <div class="footer"></div>\n  </div>\n';
+  $template.innerHTML = '\n  <style>\n    .container {\n      display: flex;\n      flex-direction: column;\n      align-items: center;\n      justify-content: center;\n      padding: 16px 0; \n    }\n    h1 {\n      font-weight: 700;\n      font-size: 16px;\n      letter-spacing: 0.5px;\n      text-transform: uppercase;\n      text-align: center;\n      margin-bottom: 10px;\n    }\n  \n    #statistics {\n      display: flex;\n      margin-bottom: \n    }\n\n    .statistic-container {\n      flex: 1;\n    }\n\n    .statistic-container .statistic {\n      font-size: 36px;\n      font-weight: 400;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n      text-align: center;\n      letter-spacing: 0.05em;\n      font-variant-numeric: proportional-nums;\n    }\n\n    .statistic.timer {\n      font-variant-numeric: initial;\n    }\n\n    .statistic-container .label {\n      font-size: 12px;\n      display: flex;\n      align-items: center;\n      justify-content: center;\n      text-align: center;\n    }\n\n    #guess-distribution {\n      width: 80%;\n    }\n\n    .graph-container {\n      width: 100%;\n      height: 20px;\n      display: flex;\n      align-items: center;\n      padding-bottom: 4px;\n      font-size: 14px;\n      line-height: 20px;\n    }\n\n    .graph-container .graph {\n      width: 100%;\n      height: 100%;\n      padding-left: 4px;\n    }\n\n    .graph-container .graph .graph-bar {\n      height: 100%;\n      /* Assume no wins */\n      width: 0%;\n      position: relative;\n      background-color: var(--color-absent);\n      display: flex;\n      justify-content: center;\n    }\n\n    .graph-container .graph .graph-bar.highlight {\n      background-color: var(--color-correct);\n    }\n\n    .graph-container .graph .graph-bar.align-right {\n      justify-content: flex-end;\n      padding-right: 8px;\n    }\n\n    .graph-container .graph .num-guesses {\n      font-weight: bold;\n      color: var(--tile-text-color);\n    }\n\n    #statistics,\n    #guess-distribution {\n      padding-bottom: 10px;\n    }\n\n    .footer {\n      display: flex;\n      width: 100%;\n    }\n\n    .countdown {\n      border-right: 1px solid var(--color-tone-1);\n      padding-right: 12px;\n      width: 50%;\n    }\n\n    .share {\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      padding-left: 12px;\n      width: 50%;\n    }\n\n    .no-data {\n      text-align: center;\n    }\n\n    button#share-button {\n      background-color: var(--key-bg-correct);\n      color: var(--key-evaluated-text-color);\n      font-family: inherit;\n      font-weight: bold;\n      border-radius: 4px;\n      cursor: pointer;\n      border: none;\n      user-select: none;\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      text-transform: uppercase;\n      -webkit-tap-highlight-color: rgba(0,0,0,0.3);\n      width: 80%;\n      font-size: 12px;\n      height: 52px;\n      -webkit-filter: brightness(100%);\n    }\n    button#share-button:hover {\n      opacity: 0.9;\n    }\n    button#share-button game-icon {\n      width: 24px;\n      height: 24px;\n      padding-left: 8px;\n    }\n  </style>\n\n  <div class="container">\n    <h1>Statistika</h1>\n    <div id="statistics"></div>\n    <h1>Oyun tarixi</h1>\n    <div id="guess-distribution"></div>\n    <div class="footer"></div>\n  </div>\n';
   /** @type {!Element} */
   var tpl = document.createElement("template");
   /** @type {string} */
@@ -7696,14 +8199,34 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var cached = document.createElement("template");
   /** @type {string} */
   cached.innerHTML = '\n  <div class="countdown">\n    <h1>Növbəti söz</h1>\n    <div id="timer">\n      <div class="statistic-container">\n        <div class="statistic timer">\n          <countdown-timer></countdown-timer>\n        </div>\n      </div>\n    </div>\n  </div>\n  <div class="share">\n    <button id="share-button">\n      Nəticəni paylaşın\n    </button>\n  </div>\n';
+  /**
+   * Labels for the statistics cards.
+   *
+   * Only four of these are rendered today - see the
+   * ["gamesPlayed", "winPercentage", "currentStreak", "maxStreak"] list inside
+   * <game-stats>.  The remaining entries are kept so the stats modal can be
+   * extended without touching the data layer.
+   */
   var dragitemhomes = {
-    currentStreak : "Cari oyun",
-    maxStreak : "Ən yaxşı oyun",
-    winPercentage : "% Qazandı",
+    currentStreak : "Cari seriya",
+    maxStreak : "Ən uzun seriya",
+    winPercentage : "Qazanma faizi",
     gamesPlayed : "Ümumi",
     gamesWon : "Qazandı",
     averageGuesses : "Cəhdlərin orta sayı"
   };
+  /* ------------------------------------------------------------------------ *
+   * <game-stats> - STATISTICS MODAL
+   * ------------------------------------------------------------------------ *
+   * Shows the four headline numbers plus the distribution of wins per number of
+   * tries, and - once the game is over - the countdown to the next word and the
+   * "share result" button.
+   *
+   * The share text is built here: one emoji per cell of every finished row, a
+   * "*" when hard mode was on, and the puzzle number (never the answer itself).
+   * The emoji depend on the active theme, mirroring the colour the player saw:
+   * dark theme -> black/white squares, colour-blind theme -> orange/blue.
+   * ------------------------------------------------------------------------ */
   var XProgressbarElement = function(e) {
     /**
      * @return {?}
@@ -7846,7 +8369,14 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var result = document.createElement("template");
   /** @type {string} */
-  result.innerHTML = '\n  <style>\n    :host {\n    }\n    .container {\n      display: flex;\n      justify-content: space-between;\n    }\n    .switch {\n      height: 20px;\n      width: 32px;\n      vertical-align: middle;\n      /* not quite right */\n      background: var(--color-tone-3);\n      border-radius: 999px;\n      display: block;\n      position: relative;\n    }\n    .knob {\n      display: block;\n      position: absolute;\n      left: 2px;\n      top: 2px;\n      height: calc(100% - 4px);\n      width: 50%;\n      border-radius: 8px;\n      background: var(--white);\n      transform: translateX(0);\n      transition: transform 0.3s;\n    }\n    :host([checked]) .switch {\n      background: var(--color-correct);\n    }\n    :host([checked]) .knob {\n      transform: translateX(calc(100% - 4px));\n    }\n    :host([disabled]) .switch {\n      opacity: 0.5;\n    }\n  </style>\n  <div class="container">\n    <label><slot></slot></label>\n    <div class="switch">\n      <span class="knob"></div>\n    </div>\n  </div>\n';
+  result.innerHTML = '\n  <style>\n    :host {\n    }\n    .container {\n      display: flex;\n      justify-content: space-between;\n    }\n    .switch {\n      height: 20px;\n      width: 32px;\n      vertical-align: middle;\n      /* not quite right */\n      background: var(--color-tone-3);\n      border-radius: 999px;\n      display: block;\n      position: relative;\n    }\n    .knob {\n      display: block;\n      position: absolute;\n      left: 2px;\n      top: 2px;\n      height: calc(100% - 4px);\n      width: 50%;\n      border-radius: 8px;\n      background: var(--white);\n      transform: translateX(0);\n      transition: transform 0.3s;\n    }\n    :host([checked]) .switch {\n      background: var(--color-correct);\n    }\n    :host([checked]) .knob {\n      transform: translateX(calc(100% - 4px));\n    }\n    :host([disabled]) .switch {\n      opacity: 0.5;\n    }\n  </style>\n  <div class="container">\n    <label><slot></slot></label>\n    <div class="switch">\n      <span class="knob"></span>\n    </div>\n  </div>\n';
+  /* ------------------------------------------------------------------------ *
+   * <game-switch> - TOGGLE SWITCH
+   * ------------------------------------------------------------------------ *
+   * `checked` / `disabled` are reflected attributes styled with :host([checked]).
+   * Toggling one dispatches `game-switch-change`, which <game-settings> bubbles
+   * up as `game-setting-change` for <game-app> and <game-theme-manager>.
+   * ------------------------------------------------------------------------ */
   var XBabel = function(e) {
     /**
      * @return {?}
@@ -7894,6 +8424,12 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var element = document.createElement("template");
   /** @type {string} */
   element.innerHTML = '\n  <style>\n  .instructions {\n    font-size: 14px;\n    color: var(--color-tone-1)\n  }\n\n  .examples {\n    border-bottom: 1px solid var(--color-tone-4);\n    border-top: 1px solid var(--color-tone-4);\n  }\n\n  .example {\n    margin-top: 24px;\n    margin-bottom: 24px;\n  }\n\n  game-tile {\n    width: 40px;\n    height: 40px;\n  }\n\n  :host([page]) section {\n    padding: 16px;\n    padding-top: 0px;\n  }\n\n  </style>\n  <section>\n    <div class="instructions">\n      <p>Söz tapın <strong>WORDLE🇦🇿</strong> 6 cəhdə</p>\n      <p>Hər bir söz <strong>BEŞ</strong> hərfdən ibarətdir və siz bu sözü <strong>ALTI</strong> cəhdə tapmalısınız!</p>\n      <p>Hər cəhdən sonra xananın rəngi dəyişəcək və yazdığınız sözün nəzərdə tutulmuş sözə nə qədər yaxın olduğunu göstərəcək.</p>\n      <div class="examples">\n        <p><strong>Nümunə</strong></p>\n        <div class="example">\n          <div class="row">\n            <game-tile letter="V" evaluation="correct" reveal></game-tile>\n            <game-tile letter="Ə"></game-tile>\n            <game-tile letter="R"></game-tile>\n            <game-tile letter="Ə"></game-tile>\n            <game-tile letter="Q"></game-tile>\n          </div>\n          <p><strong>V</strong> hərfi sözdə var doğru yerdədir.</p>\n        </div>\n        <div class="example">\n          <div class="row">\n            <game-tile letter="D"></game-tile>\n            <game-tile letter="A" evaluation="present" reveal></game-tile>\n            <game-tile letter="İ"></game-tile>\n            <game-tile letter="R"></game-tile>\n            <game-tile letter="Ə"></game-tile>\n          </div>\n          <p><strong>A</strong> hərfi sözdə var amma başqa yerdədir.</p>\n        </div>\n        <div class="example">\n          <div class="row">\n            <game-tile letter="M"></game-tile>\n            <game-tile letter="E"></game-tile>\n            <game-tile letter="Y"></game-tile>\n            <game-tile letter="V"></game-tile>\n            <game-tile letter="Ə"  evaluation="absent" reveal></game-tile>\n          </div>\n          <p> <strong>Ə</strong> hərfi heç bir yerə yoxdur.</p>\n        </div>\n      </div>\n      <p><strong>Hər gün yeni söz🇦🇿!</strong></p>\n    </div>\n  </section>\n';
+  /* ------------------------------------------------------------------------ *
+   * <game-help> - THE RULES
+   * ------------------------------------------------------------------------ *
+   * Rendered either inside the first-visit <game-modal> or as a full page when
+   * opened from the "?" button (the `page` attribute switches the layout).
+   * ------------------------------------------------------------------------ */
   var XDrawerElement = function(e) {
     /**
      * @return {?}
@@ -7917,7 +8453,14 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var template = document.createElement("template");
   /** @type {string} */
-  template.innerHTML = "\n  <style>\n    .overlay {\n      display: none;\n      position: absolute;\n      width: 100%;\n      height: 100%;\n      top: 0;\n      left: 0;\n      justify-content: center;\n      background-color: var(--color-background);\n      animation: SlideIn 100ms linear;\n      z-index: ".concat(2E3, ';\n    }\n\n    :host([open]) .overlay {\n      display: flex;\n    }\n\n    .content {\n      position: relative;\n      color: var(--color-tone-1);\n      padding: 0 32px;\n      max-width: var(--game-max-width);\n      width: 100%;\n      overflow-y: auto;\n      height: 100%;\n      display: flex;\n      flex-direction: column;\n    }\n\n    .content-container {\n      height: 100%;\n    }\n\n    .overlay.closing {\n      animation: SlideOut 150ms linear;\n    }\n\n    header {\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      position: relative;\n    }\n\n    h1 {\n      font-weight: 700;\n      font-size: 16px;\n      letter-spacing: 0.5px;\n      text-transform: ;\n      text-align: center;\n      margin-bottom: 10px;\n    }\n\n    game-icon {\n      position: absolute;\n      right: 0;\n      user-select: none;\n      cursor: pointer;\n    }\n\n    @media only screen and (min-device-width : 320px) and (max-device-width : 480px) {\n      .content {\n        max-width: 100%;\n        padding: 0;\n      }\n      game-icon {\n        padding: 0 16px;\n      }\n    }\n\n    @keyframes SlideIn {\n      0% {\n        transform: translateY(30px);\n        opacity: 0;\n      }\n      100% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n    }\n    @keyframes SlideOut {\n      0% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n      90% {\n        opacity: 0;\n      }\n      100% {\n        opacity: 0;\n        transform: translateY(60px);\n      }\n    }\n  </style>\n  <div class="overlay">\n    <div class="content">\n      <header>\n        <h1><slot></slot></h1>\n        <game-icon icon="close"></game-icon>\n      </header>\n      <div class="content-container">\n        <slot name="content"></slot>\n      </div>\n    </div>\n  </div>\n');
+  template.innerHTML = "\n  <style>\n    .overlay {\n      display: none;\n      position: absolute;\n      width: 100%;\n      height: 100%;\n      top: 0;\n      left: 0;\n      justify-content: center;\n      background-color: var(--color-background);\n      animation: SlideIn 100ms linear;\n      z-index: ".concat(2E3, ';\n    }\n\n    :host([open]) .overlay {\n      display: flex;\n    }\n\n    .content {\n      position: relative;\n      color: var(--color-tone-1);\n      padding: 0 32px;\n      max-width: var(--game-max-width);\n      width: 100%;\n      overflow-y: auto;\n      height: 100%;\n      display: flex;\n      flex-direction: column;\n    }\n\n    .content-container {\n      height: 100%;\n    }\n\n    .overlay.closing {\n      animation: SlideOut 150ms linear;\n    }\n\n    header {\n      display: flex;\n      justify-content: center;\n      align-items: center;\n      position: relative;\n    }\n\n    h1 {\n      font-weight: 700;\n      font-size: 16px;\n      letter-spacing: 0.5px;\n      text-transform: uppercase;\n      text-align: center;\n      margin-bottom: 10px;\n    }\n\n    game-icon {\n      position: absolute;\n      right: 0;\n      user-select: none;\n      cursor: pointer;\n    }\n\n    @media only screen and (min-device-width : 320px) and (max-device-width : 480px) {\n      .content {\n        max-width: 100%;\n        padding: 0;\n      }\n      game-icon {\n        padding: 0 16px;\n      }\n    }\n\n    @keyframes SlideIn {\n      0% {\n        transform: translateY(30px);\n        opacity: 0;\n      }\n      100% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n    }\n    @keyframes SlideOut {\n      0% {\n        transform: translateY(0px);\n        opacity: 1;\n      }\n      90% {\n        opacity: 0;\n      }\n      100% {\n        opacity: 0;\n        transform: translateY(60px);\n      }\n    }\n  </style>\n  <div class="overlay">\n    <div class="content">\n      <header>\n        <h1><slot></slot></h1>\n        <game-icon icon="close"></game-icon>\n      </header>\n      <div class="content-container">\n        <slot name="content"></slot>\n      </div>\n    </div>\n  </div>\n');
+  /* ------------------------------------------------------------------------ *
+   * <game-page> - FULL-SCREEN PAGE OVERLAY
+   * ------------------------------------------------------------------------ *
+   * Used for "Qaydalar" (rules) and "Ayarlar" (settings).  Content is appended
+   * as light DOM and projected through a <slot>, and all of it is deleted again
+   * once the close animation finishes.
+   * ------------------------------------------------------------------------ */
   var XCheckboxElement = function(e) {
     /**
      * @return {?}
@@ -7954,7 +8497,10 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   /** @type {!Element} */
   var templateElement = document.createElement("template");
   /** @type {string} */
-  templateElement.innerHTML = '\n  <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24">\n    <path fill=var(--color-tone-3) />\n  </svg>\n';
+  // The icon colour comes from `currentColor` so it follows the active theme.
+  // `:host` defines the default (--color-tone-3) and `connectedCallback`
+  // overrides it inline for the few icons that need a different colour.
+  templateElement.innerHTML = '\n  <style>\n    :host { color: var(--color-tone-3); }\n  </style>\n  <svg xmlns="http://www.w3.org/2000/svg" height="24" viewBox="0 0 24 24" width="24" aria-hidden="true" focusable="false">\n    <path fill="currentColor" />\n  </svg>\n';
   var opts = {
     help : "M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z",
     settings : "M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.43,0.17-0.47,0.41L9.25,5.35C8.66,5.59,8.12,5.92,7.63,6.29L5.24,5.33c-0.22-0.08-0.47,0-0.59,0.22L2.74,8.87 C2.62,9.08,2.66,9.34,2.86,9.48l2.03,1.58C4.84,11.36,4.8,11.69,4.8,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.36,2.54 c0.05,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.47-0.41l0.36-2.54c0.59-0.24,1.13-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0,0.59-0.22l1.92-3.32c0.12-0.22,0.07-0.47-0.12-0.61L19.14,12.94z M12,15.6c-1.98,0-3.6-1.62-3.6-3.6 s1.62-3.6,3.6-3.6s3.6,1.62,3.6,3.6S13.98,15.6,12,15.6z",
@@ -7963,6 +8509,13 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
     share : "M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81 1.66 0 3-1.34 3-3s-1.34-3-3-3-3 1.34-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9c-1.66 0-3 1.34-3 3s1.34 3 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.16c-.05.21-.08.43-.08.65 0 1.61 1.31 2.92 2.92 2.92s2.92-1.31 2.92-2.92c0-1.61-1.31-2.92-2.92-2.92zM18 4c.55 0 1 .45 1 1s-.45 1-1 1-1-.45-1-1 .45-1 1-1zM6 13c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm12 7.02c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1z",
     statistics : "M16,11V3H8v6H2v12h20V11H16z M10,5h4v14h-4V5z M4,11h4v8H4V11z M20,19h-4v-6h4V19z"
   };
+  /* ------------------------------------------------------------------------ *
+   * <game-icon> - INLINE SVG ICON
+   * ------------------------------------------------------------------------ *
+   * The path data lives in the `opts` map just above, keyed by the `icon` attribute.
+   * Unknown names simply leave the path empty, so a typo shows a blank icon
+   * rather than throwing.
+   * ------------------------------------------------------------------------ */
   var XThrobberElement = function(e) {
     /**
      * @return {?}
@@ -7982,10 +8535,11 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
         var index = this.getAttribute("icon");
         this.shadowRoot.querySelector("path").setAttribute("d", opts[index]);
         if ("backspace" === index) {
-          this.shadowRoot.querySelector("path").setAttribute("fill", "var(--color-tone-1)");
+          // Inline style so that the CSS variable is resolved reliably.
+          this.shadowRoot.querySelector("path").style.fill = "var(--color-tone-1)";
         }
         if ("share" === index) {
-          this.shadowRoot.querySelector("path").setAttribute("fill", "var(--white)");
+          this.shadowRoot.querySelector("path").style.fill = "var(--white)";
         }
       }
     }]), update;
@@ -7999,6 +8553,14 @@ this.wordle = this.wordle || {}, this.wordle.bundle = function(exports) {
   var msDay = 6E4;
   /** @type {number} */
   var msMonth = 36E5;
+  /* ------------------------------------------------------------------------ *
+   * <countdown-timer> - "NÖVBƏTİ SÖZ" COUNTDOWN
+   * ------------------------------------------------------------------------ *
+   * Counts down to the next local midnight, i.e. when the next daily word
+   * becomes available.  It ticks every 200 ms (cheap, and it keeps the seconds
+   * accurate without a drift-prone 1 s interval) and the interval is cleared in
+   * disconnectedCallback.
+   * ------------------------------------------------------------------------ */
   var XIconElement = function(e) {
     /**
      * @return {?}

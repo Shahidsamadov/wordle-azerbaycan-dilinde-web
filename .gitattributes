@@ -1,0 +1,44 @@
+# Line-ending and binary-file policy.
+#
+# Why this file exists: the repository used to mix conventions - main.js was
+# stored with LF while index.html, manifest.json and all word lists used CRLF -
+# so Git printed "LF will be replaced by CRLF" on almost every commit and diffs
+# could be polluted by newline-only changes.
+#
+# `text=auto` makes Git normalise all text files to LF inside the repository
+# while leaving the working tree to the platform (CRLF on Windows, LF
+# elsewhere).  Nothing is rewritten until a file is next modified, so adding
+# this file does not create a mass change on its own.
+#
+# To normalise the existing files once, in a dedicated commit:
+#
+#     git add --renormalize .
+#     git commit -m "Normalise line endings"
+#
+* text=auto
+
+# Images and fonts are binary; never try to diff or convert them.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.ico  binary
+*.ttf  binary
+*.otf  binary
+*.woff  binary
+*.woff2 binary
+
+# The Python tooling in tools/ parses main.js and wordbase/*.txt as text.
+# Keeping these as plain text is intended, so be explicit about it.
+*.py  text
+*.txt text
+*.js  text
+*.json text
+*.html text
+*.md  text
+
+# GitHub language detection: keep the generated bundle from dominating the
+# language statistics of the repository.
+main.js linguist-generated=true
+wordbase/*.txt linguist-documentation

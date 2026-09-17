@@ -1,0 +1,55 @@
+LICENSE FOR THE WORD BASE
+=========================
+
+The Azerbaijani word lists in this directory
+
+    main_words.txt          the 1 469 daily answers
+    examination_words.txt   the 3 403 extra accepted guesses
+    words_base.txt          the raw merged dictionary they were derived from
+
+are a compilation produced by Shahid Samadov and are licensed under the
+
+    Creative Commons Attribution 4.0 International License (CC BY 4.0)
+
+Full legal text:  https://creativecommons.org/licenses/by/4.0/legalcode
+
+You are free to:
+
+  Share  - copy and redistribute the material in any medium or format
+  Adapt  - remix, transform, and build upon the material for any purpose,
+           even commercially
+
+Under the following terms:
+
+  Attribution - You must give appropriate credit, provide a link to the
+                license, and indicate if changes were made.  You may do so in
+                any reasonable manner, but not in any way that suggests the
+                licensor endorses you or your use.
+
+  No additional restrictions - You may not apply legal terms or technological
+                measures that legally restrict others from doing anything the
+                license permits.
+
+Suggested attribution string:
+
+    "Azerbaijani five-letter word base from the WordleAZ project by
+     Shahid Samadov, licensed under CC BY 4.0.
+     Source: https://github.com/Shahidsamadov/wordle-azerbaycan-dilinde-web"
+
+---------------------------------------------------------------------------
+PROVENANCE
+---------------------------------------------------------------------------
+The lists were compiled by merging several Azerbaijani dictionaries, keeping
+the entries that are exactly five letters long and use only the 32 letters of
+the Azerbaijani alphabet, then splitting them into common daily answers and
+rare-but-accepted guesses.
+
+The individual source dictionaries are third-party material.  Their exact
+editions and licenses were not recorded at the time of compilation, so the
+CC BY 4.0 license above covers **this compilation only** and does not claim to
+relicense the underlying dictionaries.  If you intend to reuse these lists in a
+way that requires certainty about the origin of every single word, verify the
+sources first, or rebuild the list from dictionaries whose license you know.
+
+If you are a rights holder and believe an entry should not be redistributed
+here, please open an issue and it will be removed.
